@@ -119,10 +119,6 @@ const PLAYHEAD_GLOW = 22;
 /** 命中时该列光带的长度（沿时间轴） */
 const HIT_GLOW_LEN = 64;
 
-function isPushAction(action: TabAction): boolean {
-  return action === 'blowPush' || action === 'drawPush';
-}
-
 /** 底部/右侧音阶标注单元：命中时整格被高亮色点亮（UI 线程，不触发重渲染） */
 interface LaneLabelProps {
   hole: Hole;
