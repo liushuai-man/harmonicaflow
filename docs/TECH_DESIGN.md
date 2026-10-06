@@ -444,13 +444,19 @@ npx eas-cli@latest build -p android --profile production
 
 ```bash
 npx expo install expo-updates
-npx eas-cli@latest update:configure   # 写入 runtimeVersion / updates.url / extra.eas.projectId
-# 在 eas.json 的 preview / production profile 上各加一个 channel 字段
-npx eas-cli@latest update --branch production --message "修复跟吹页..."
+npx eas-cli@latest update:configure   # 写入 runtimeVersion / updates.url / extra.eas.projectId，
+                                      # 并自动给 eas.json 的 preview / production 档位补上 channel
+npx eas-cli@latest build -p android --profile preview   # channel 是打进包里的，必须重新出一次包
+# 发布（SDK 55 起 --environment 为必填）
+npx eas-cli@latest update --channel preview --message "修复跟吹页..." --environment preview
 ```
 
-- 前提：`expo-updates` 与 `runtimeVersion` 已配置，且客户端构建时带上了对应 `channel`。
+- 前提：`expo-updates` 与 `runtimeVersion` 已配置，且客户端构建时带上了对应 `channel`；**旧包（未带 channel）收不到更新，需重装一次**。
+- 生效方式：更新在启动时后台下载，重启 App（最多两次）后应用。
 - 约束：改的是原生代码或新增原生模块时，**必须**重新 `eas build`，OTA 无法生效。
+- 回滚：在 EAS 的 Updates 列表选历史版本重新发布，或参考 `npx eas-cli@latest update:republish --help`。
+- 分渠道验证：先推 `preview` 确认无误，再推 `production`。
+- 面向使用者的操作步骤见 [README §6](../README.md)。
 
 ### 11.7 后续可选：CI 自动出包
 
