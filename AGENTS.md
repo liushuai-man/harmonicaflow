@@ -34,6 +34,15 @@ Run lint and typecheck before declaring any task done.
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
 
+## Git 提交（多次少量）
+
+- **小步提交**：每完成一个可独立说明的改动就立刻提交到本地，不要攒成一个巨型提交。宁可多提交几次，也不要把多个不相关的改动混在一起。
+- **一次提交只做一件事**：按逻辑边界拆分（如 `docs` / `core` / `theme` / `ui` / `app` / `test` 各自独立成 commit），保证每个提交都能单独回退。
+- **提交前保持可编译**：至少跑 `npx tsc --noEmit`（涉及核心逻辑时再跑 `npm run verify`），不让坏状态进入历史。
+- **沿用现有提交风格**：`chore:` / `docs:` / `feat(core):` / `feat(ui):` / `fix:` / `test:` 前缀 + 中文简述（说明「为什么」而非「改了什么」）。
+- **精确暂存**：只 `git add` 本次改动涉及的文件，不要用 `git add -A` 混入无关文件。
+- **提交时机**：仅在用户要求提交时执行；执行时按上述粒度拆成多次提交，而不是一次提交全部改动。
+
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.

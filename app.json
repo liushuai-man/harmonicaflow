@@ -3,15 +3,16 @@
     "name": "口琴跟吹助手",
     "slug": "harmonicaflow",
     "scheme": "harmonicaflow",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "plugins": ["expo-router"],
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.harmonicaflow.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
