@@ -10,3 +10,5 @@ export {
 } from './SegmentedControl';
 export { Row, type RowProps } from './Row';
 export { HarmonicaMark, type HarmonicaMarkProps } from './HarmonicaMark';
+export { Slider, type SliderProps } from './Slider';
+export { SongCover, type SongCoverProps } from './SongCover';

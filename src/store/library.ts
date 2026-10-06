@@ -3,6 +3,18 @@ import { DEFAULT_LAYOUT_ID } from '../core/layouts';
 import { detectFormat, parse } from '../core/parsers';
 import { decodeUtf8 } from '../core/text';
 import {
+  DEFAULT_FLOW,
+  DEFAULT_ONLINE_COVER,
+  DEFAULT_OPACITY,
+  DEFAULT_SKIN,
+  DEFAULT_STAFF_BAR,
+  DEFAULT_VIEW_ANGLE,
+  type FlowSetting,
+  type OpacityMode,
+  type SkinMode,
+  type StaffBarMode,
+} from '../core/visual';
+import {
   ensureDir,
   hashPickedFile,
   readBytes,
@@ -23,11 +35,13 @@ import odeToJoySong from '../../assets/songs/ode-to-joy.json';
  * 不引入 AsyncStorage：
  *   - scores/{id}.{ext}    导入的原始乐谱文件
  *   - library.json         曲库索引
- *   - prefs.json           用户偏好（口琴预设 / 倍速 / 主题 / 主色 / 透视 / 音阶表校对）
+ *   - prefs.json           用户偏好
+ *
+ * 偏好里的**产品行为项**（落块方向 / 视角 / 皮肤 / 透明度 / 琴谱条 / 封面开关）
+ * 一律是"可自由定义 + 顺手默认值"，不设互斥硬约束（见 docs/PRD.md §6.4）。
  */
 
 export type ThemeMode = 'system' | 'light' | 'dark';
-export type PerspectiveLevel = 'off' | 'weak' | 'strong';
 
 /** 默认主色（品牌蓝），也是旧版本 prefs 缺失 accent 时的回落值 */
 export const DEFAULT_ACCENT = '#2F80ED';
@@ -42,6 +56,8 @@ export interface LibraryEntry {
   fileName: string;
   noteCount: number;
   importedAt: number;
+  /** 用户为这首曲目选的封面（本地图片 URI 或（开启开关后）缓存的远程 URL） */
+  coverUri?: string;
 }
 
 export interface Prefs {
@@ -51,8 +67,18 @@ export interface Prefs {
   themeMode: ThemeMode;
   /** 主色（#RRGGBB），深浅两套色板由它派生 */
   accent: string;
-  /** 纵向透视强度（近大远小） */
-  perspective: PerspectiveLevel;
+  /** 皮肤：白线（默认）/ 彩色 */
+  skin: SkinMode;
+  /** 透明度档位 */
+  opacity: OpacityMode;
+  /** 落块方向：从上到下 / 从左到右 / 自动（默认） */
+  flow: FlowSetting;
+  /** 视角角度（度）：0 = 100% 垂直，连续可调至 VIEW_ANGLE_MAX */
+  viewAngle: number;
+  /** 横向琴谱条：完整谱面 / 判定线附近精简提示 / 关闭 */
+  staffBar: StaffBarMode;
+  /** 是否允许拉取在线随机封面（默认关；离线优先） */
+  onlineCover: boolean;
   /** 用户校对后的音阶表覆盖：layoutId → holes */
   layoutOverrides: Record<string, Hole[]>;
 }
@@ -62,13 +88,20 @@ export const DEFAULT_PREFS: Prefs = {
   speed: 1,
   themeMode: 'system',
   accent: DEFAULT_ACCENT,
-  perspective: 'weak',
+  skin: DEFAULT_SKIN,
+  opacity: DEFAULT_OPACITY,
+  flow: DEFAULT_FLOW,
+  viewAngle: DEFAULT_VIEW_ANGLE,
+  staffBar: DEFAULT_STAFF_BAR,
+  onlineCover: DEFAULT_ONLINE_COVER,
   layoutOverrides: {},
 };
 
 const SCORES_DIR = 'scores';
 const INDEX_PATH = 'library.json';
 const PREFS_PATH = 'prefs.json';
+/** 封面单独存：内置曲目不在 library.json 索引里，用 id → uri 映射才能一并覆盖 */
+const COVERS_PATH = 'covers.json';
 const INDEX_VERSION = 1;
 
 /** 内置示例曲：随包发布，无需拷贝到文件系统 */
@@ -116,8 +149,33 @@ async function writeImportedIndex(entries: LibraryEntry[]): Promise<void> {
   await writeText(INDEX_PATH, JSON.stringify({ version: INDEX_VERSION, entries }));
 }
 
+async function readCovers(): Promise<Record<string, string>> {
+  const raw = await readText(COVERS_PATH);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function listLibrary(): Promise<LibraryEntry[]> {
-  return [...getBuiltInEntries(), ...(await readImportedIndex())];
+  const [imported, covers] = await Promise.all([readImportedIndex(), readCovers()]);
+  return [...getBuiltInEntries(), ...imported].map((entry) =>
+    covers[entry.id] ? { ...entry, coverUri: covers[entry.id] } : entry,
+  );
+}
+
+/**
+ * 记录某首曲目的封面（本地图片 URI，或开启在线开关后缓存的远程 URL）。
+ * 传 `null` 清除。封面与曲库索引解耦，内置示例曲也能设封面。
+ */
+export async function setCoverUri(id: string, uri: string | null): Promise<void> {
+  const covers = await readCovers();
+  if (uri) covers[id] = uri;
+  else delete covers[id];
+  await writeText(COVERS_PATH, JSON.stringify(covers));
 }
 
 // ── 读取乐谱 ────────────────────────────────────────────
@@ -198,31 +256,44 @@ export async function deleteEntry(id: string): Promise<void> {
   if (!target) return;
   await remove(scorePath(target.fileName));
   scoreCache.delete(id);
+  await setCoverUri(id, null);
   await writeImportedIndex(entries.filter((e) => e.id !== id));
 }
 
 // ── 用户偏好 ────────────────────────────────────────────
 
+/** 旧版本 `perspective` 枚举 → 角度（off→0 / weak→22 / strong→34） */
+const LEGACY_PERSPECTIVE_ANGLE: Record<string, number> = { off: 0, weak: 22, strong: 34 };
+
+function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
 export async function loadPrefs(): Promise<Prefs> {
   const raw = await readText(PREFS_PATH);
   if (raw === null) return DEFAULT_PREFS;
   try {
-    const parsed = JSON.parse(raw) as Partial<Prefs>;
+    const parsed = JSON.parse(raw) as Partial<Prefs> & { perspective?: unknown };
+    // 旧字段 `perspective`（枚举）升级为 `viewAngle`（数值）：读到时迁移，写回由下一次 savePrefs 完成
+    const legacyAngle = LEGACY_PERSPECTIVE_ANGLE[String(parsed.perspective)];
+    const viewAngle =
+      typeof parsed.viewAngle === 'number' && parsed.viewAngle >= 0
+        ? parsed.viewAngle
+        : (legacyAngle ?? DEFAULT_PREFS.viewAngle);
     return {
       layoutId: parsed.layoutId ?? DEFAULT_PREFS.layoutId,
       speed: typeof parsed.speed === 'number' && parsed.speed > 0 ? parsed.speed : DEFAULT_PREFS.speed,
-      themeMode:
-        parsed.themeMode === 'light' || parsed.themeMode === 'dark' || parsed.themeMode === 'system'
-          ? parsed.themeMode
-          : DEFAULT_PREFS.themeMode,
+      themeMode: pickEnum(parsed.themeMode, ['system', 'light', 'dark'] as const, DEFAULT_PREFS.themeMode),
       accent:
         typeof parsed.accent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.accent)
           ? parsed.accent
           : DEFAULT_PREFS.accent,
-      perspective:
-        parsed.perspective === 'off' || parsed.perspective === 'strong' || parsed.perspective === 'weak'
-          ? parsed.perspective
-          : DEFAULT_PREFS.perspective,
+      skin: pickEnum(parsed.skin, ['mono', 'color'] as const, DEFAULT_PREFS.skin),
+      opacity: pickEnum(parsed.opacity, ['solid', 'soft', 'glass'] as const, DEFAULT_PREFS.opacity),
+      flow: pickEnum(parsed.flow, ['down', 'right', 'auto'] as const, DEFAULT_PREFS.flow),
+      viewAngle,
+      staffBar: pickEnum(parsed.staffBar, ['full', 'hint', 'off'] as const, DEFAULT_PREFS.staffBar),
+      onlineCover: parsed.onlineCover === true,
       layoutOverrides: parsed.layoutOverrides ?? {},
     };
   } catch {

@@ -13,7 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LAYOUTS, getLayout } from '../core/layouts';
 import type { Hole } from '../core/model';
 import { midiToNoteName, tryNoteNameToMidi } from '../core/pitch';
-import type { PerspectiveLevel, ThemeMode } from '../store/library';
+import {
+  VIEW_ANGLE_MAX,
+  VIEW_PRESETS,
+  type FlowSetting,
+  type OpacityMode,
+  type SkinMode,
+  type StaffBarMode,
+} from '../core/visual';
+import type { ThemeMode } from '../store/library';
 import { usePrefs } from '../store/prefs';
 import { readableOn } from '../theme/color';
 import { ACCENT_PRESETS } from '../theme/palette';
@@ -27,18 +35,21 @@ import {
   IconTile,
   Row,
   SegmentedControl,
+  Slider,
   type IconName,
 } from '../ui/components';
 
 /**
  * 统一设置页（见 docs/TECH_DESIGN.md §8）
  *
- *  - 外观：主题模式（跟随系统/浅色/深色）+ 主色
- *  - 跟吹视图：纵向透视强度
+ *  - 外观：主题模式（跟随系统/浅色/深色）+ 皮肤（白线/彩色）+ 主色 + 透明度
+ *  - 跟吹视图：落块方向（自动/上到下/左到右）+ 视角（预设 + 连续角度）+ 横向琴谱
+ *  - 封面：是否允许在线随机封面（默认关，离线优先）
  *  - 口琴：预设切换，改动后跟吹页即时重排指法
  *  - 音阶表校对：逐孔编辑吹/吸（半音阶另有推键列），非法音名标红且禁止保存
  *
  * 所有可配置项集中在此页；写入统一走 updatePrefs，避免与主题层互相覆盖。
+ * 这里的每一项都是「用户可自由定义」的偏好，不是硬约束——默认值只求顺手。
  */
 
 const THEME_OPTIONS: { label: string; value: ThemeMode; icon: IconName }[] = [
@@ -47,10 +58,32 @@ const THEME_OPTIONS: { label: string; value: ThemeMode; icon: IconName }[] = [
   { label: '深色', value: 'dark', icon: 'moon' },
 ];
 
-const PERSPECTIVE_OPTIONS: { label: string; value: PerspectiveLevel }[] = [
-  { label: '关', value: 'off' },
-  { label: '弱', value: 'weak' },
-  { label: '强', value: 'strong' },
+const SKIN_OPTIONS: { label: string; value: SkinMode }[] = [
+  { label: '白线', value: 'mono' },
+  { label: '彩色', value: 'color' },
+];
+
+const OPACITY_OPTIONS: { label: string; value: OpacityMode }[] = [
+  { label: '实心', value: 'solid' },
+  { label: '柔和', value: 'soft' },
+  { label: '玻璃', value: 'glass' },
+];
+
+const FLOW_OPTIONS: { label: string; value: FlowSetting }[] = [
+  { label: '自动', value: 'auto' },
+  { label: '从上到下', value: 'down' },
+  { label: '从左到右', value: 'right' },
+];
+
+const STAFF_OPTIONS: { label: string; value: StaffBarMode }[] = [
+  { label: '完整谱面', value: 'full' },
+  { label: '精简提示', value: 'hint' },
+  { label: '关闭', value: 'off' },
+];
+
+const COVER_OPTIONS: { label: string; value: 'on' | 'off' }[] = [
+  { label: '关闭', value: 'off' },
+  { label: '开启', value: 'on' },
 ];
 
 interface CellDraft {
@@ -122,6 +155,18 @@ export default function SettingsScreen() {
   const [message, setMessage] = useState<string | null>(null);
 
   const selectedId = prefs.layoutId;
+
+  /** 视角预设：当前角度若不是预设值，就临时加一个显示实际角度的选项，避免高亮错位 */
+  const presetOptions = useMemo(() => {
+    const options: { label: string; value: string }[] = VIEW_PRESETS.map((preset) => ({
+      label: preset.label,
+      value: `d${preset.degree}`,
+    }));
+    if (!VIEW_PRESETS.some((preset) => preset.degree === prefs.viewAngle)) {
+      options.push({ label: `${prefs.viewAngle}°`, value: `d${prefs.viewAngle}` });
+    }
+    return options;
+  }, [prefs.viewAngle]);
   const layout = useMemo(
     () => getLayout(selectedId, prefs.layoutOverrides),
     [selectedId, prefs.layoutOverrides],
@@ -225,11 +270,25 @@ export default function SettingsScreen() {
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxl }]}
       keyboardShouldPersistTaps="handled"
     >
-      <Section icon="palette" title="外观" hint="深浅两套配色与强调色由主色自动派生">
+      <Section icon="palette" title="外观" hint="深浅两套配色由主色派生；皮肤与透明度独立可调">
         <SegmentedControl
           options={THEME_OPTIONS}
           value={prefs.themeMode}
           onChange={(value) => updatePrefs({ themeMode: value })}
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>皮肤</Text>
+        <SegmentedControl
+          options={SKIN_OPTIONS}
+          value={prefs.skin}
+          onChange={(value) => updatePrefs({ skin: value })}
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>透明度</Text>
+        <SegmentedControl
+          options={OPACITY_OPTIONS}
+          value={prefs.opacity}
+          onChange={(value) => updatePrefs({ opacity: value })}
         />
 
         <View style={styles.swatchRow}>
@@ -263,11 +322,48 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section icon="target" title="跟吹视图" hint="以判定线为基准，远端收窄形成近大远小">
+      <Section icon="target" title="跟吹视图" hint="落块方向、视角、琴谱都可自由定义，默认值只是顺手而已">
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>落块方向</Text>
         <SegmentedControl
-          options={PERSPECTIVE_OPTIONS}
-          value={prefs.perspective}
-          onChange={(value) => updatePrefs({ perspective: value })}
+          options={FLOW_OPTIONS}
+          value={prefs.flow}
+          onChange={(value) => updatePrefs({ flow: value })}
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+          视角（0° = 完全垂直，越大越斜视）
+        </Text>
+        <SegmentedControl
+          options={presetOptions}
+          value={`d${prefs.viewAngle}`}
+          onChange={(value) => updatePrefs({ viewAngle: Number(value.slice(1)) })}
+        />
+        <Slider
+          value={prefs.viewAngle}
+          min={0}
+          max={VIEW_ANGLE_MAX}
+          step={1}
+          onChange={(value) => updatePrefs({ viewAngle: value })}
+          formatValue={(value) => (value === 0 ? '垂直' : `${value}°`)}
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>横向琴谱</Text>
+        <SegmentedControl
+          options={STAFF_OPTIONS}
+          value={prefs.staffBar}
+          onChange={(value) => updatePrefs({ staffBar: value })}
+        />
+      </Section>
+
+      <Section
+        icon="sparkles"
+        title="封面"
+        hint="本地封面优先；在线随机封面默认关，开启后拉取一次并缓存在本地"
+      >
+        <SegmentedControl
+          options={COVER_OPTIONS}
+          value={prefs.onlineCover ? 'on' : 'off'}
+          onChange={(value) => updatePrefs({ onlineCover: value === 'on' })}
         />
       </Section>
 
@@ -387,6 +483,7 @@ const styles = StyleSheet.create({
   sectionHeaderText: { flex: 1, gap: 2 },
   sectionTitle: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   sectionHint: { fontSize: 12, lineHeight: 17 },
+  fieldLabel: { fontSize: 12, marginTop: spacing.md, marginBottom: spacing.sm },
   swatchRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   swatchWrap: {
     width: 44,

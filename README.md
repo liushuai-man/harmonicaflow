@@ -1,6 +1,6 @@
 # 口琴跟吹助手 HarmonicaFlow
 
-辅助口琴吹奏的跟吹应用：导入乐谱 → 自动编配到口琴孔位 → 音块随时间下落，方块压到判定线就是该吹的时刻。
+辅助口琴吹奏的跟吹应用：导入乐谱 → 自动编配到口琴孔位 → 音块随时间流入判定线（方向可自由选择：**从上到下** / **从左到右** / **自动**），方块压到判定线就是该吹的时刻。
 
 - 技术栈：Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · Reanimated 4 · react-native-svg
 - 交付形态：安装到 Android 手机的独立 App（出包走 EAS 云端构建，**本地不需要装 Java/Android Studio**）
@@ -15,12 +15,15 @@
 | 乐谱导入 | JSON / ABC 记谱 / MusicXML（`.musicxml` `.xml` `.mxl`） |
 | 自动编配 | 解析音高与时值 → 束搜索编配到孔位与吹吸 → 标记不可吹音 |
 | 口琴预设 | 24 孔复音 / 10 孔布鲁斯 / 半音阶，可切换；音阶表可逐孔校对 |
-| 跟吹视图 | 纵向落块 + 近大远小透视 + 底部 `1234567` 简谱标注 |
+| 跟吹视图 | **落块方向**（从上到下 / 从左到右 / 自动）+ 视角（垂直↔斜视，连续可调）+ 命中高亮 |
+| 视觉风格 | **白线皮肤（默认）**：黑白灰渐变背景 + 白色线条；可切彩色皮肤；透明度、主题色可调 |
+| 横向琴谱 | 完整谱面 / 判定线附近精简提示条 / 关闭，三态可切换 |
+| 音乐封面 | 本地优先；在线随机封面为可选开关（默认关，拉取后缓存本地、离线自动回退） |
 | 触碰特效 | 方块压到判定线时在该列播放脉冲环（特效可插拔） |
-| 主题 | 跟随系统 / 浅色 / 深色；主色可调，深浅两套配色自动派生 |
+| 主题 | 跟随系统 / 浅色 / 深色；皮肤（白线 / 彩色）；主色、透明度可调 |
 | 界面 | 自建设计系统组件层（令牌 + 自绘 SVG 图标），零新增依赖，整体风格统一 |
 | 播放控制 | 播放 / 暂停 / 重播 / 倍速（0.5 / 0.75 / 1）/ 进度拖动 |
-| 设置 | 主题、主色、透视强度、口琴预设、音阶表校对集中在设置页 |
+| 设置 | 外观（深浅 / 皮肤 / 主色 / 透明度）、跟吹视图（方向 / 视角 / 琴谱）、封面、口琴预设、音阶表集中在设置页 |
 
 ---
 
@@ -46,10 +49,10 @@ npm install
 
 ```
 src/app/              页面（Expo Router 路由）：index / practice/[id] / settings
-src/core/             纯 TS 核心：乐谱解析、编配算法、音高与简谱、音阶预设
+src/core/             纯 TS 核心：乐谱解析、编配算法、音高与简谱、音阶预设、视觉参数（core/visual）
 src/player/           时序与播放状态机
-src/theme/            主题色板、几何令牌（间距/圆角/投影）与 Provider
-src/ui/               音块时间轴、播放条
+src/theme/            主题色板、皮肤令牌、几何令牌（间距/圆角/投影）与 Provider
+src/ui/               音块时间轴（含方向策略 flow）、横向琴谱、播放条
 src/ui/components/    设计系统组件（图标/卡片/按钮/徽标/分段控件/列表行/口琴插画）
 src/ui/effects/       触碰特效（接口 + 注册表 + 默认脉冲环）
 src/store/            曲库与偏好持久化
@@ -208,7 +211,7 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页方块抖�
 
 1. `npx tsc --noEmit` 与 `npm run verify` 全绿；`npx expo-doctor` 无问题。
 2. `app.json` 的 `version` 已递增；上架 Google Play 时 `android.versionCode` 也要递增。
-3. Expo Go 真机自测通过：方块下落、透视、底部简谱、触碰特效、主题切换、乐谱导入、音阶表校对。
+3. Expo Go 真机自测通过：落块方向（自动 / 从上到下 / 从左到右）、视角、皮肤与透明度、命中高亮、横向琴谱、封面（含离线回退）、触碰特效、乐谱导入、音阶表校对。
 4. 出 `preview` APK 装到目标机型复验（独立包与 Expo Go 的原生行为可能不同）。
 5. 出 `production` AAB 上架：`npx eas-cli@latest submit -p android --profile production`（需 Google Play 服务账号 JSON）。
 6. 若启用热更新，确认 channel 与 runtimeVersion 匹配后再推送。
@@ -295,7 +298,8 @@ git push origin main        # 自动跑 CI + 发布 Web 到 Pages
 
 当前**没有后端**，运行时不依赖网络：
 
-- 设置（主题 / 主色 / 透视强度 / 口琴预设 / 音阶表）与导入的乐谱，统一经 `src/store/docStore.ts` 落盘；
-- 原生走 `expo-file-system` 应用沙盒，Web 走浏览器 `localStorage`；
+- 设置（主题 / 皮肤 / 主色 / 透明度 / 落块方向 / 视角 / 横向琴谱 / 口琴预设 / 音阶表）与导入的乐谱，统一经 `src/store/docStore.ts` 落盘；
+- 原生走 `expo-file-system` 应用沙盒，Web 走浏览器 `localStorage`；封面也走同一入口（仅"在线随机封面"开关打开时联网）。
+  **注意**：封面字节缓存**只在原生端**发生（Web 端受 `localStorage` 5MB 配额限制，只记远程 URL 不缓存字节）。
 - 因此：**卸载 App 或清除浏览器站点数据会丢失数据**；且 Web 与原生各存各的，互不同步。
   后续若要跨端同步，`docStore.ts` 是唯一改造入口。

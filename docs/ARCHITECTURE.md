@@ -1,10 +1,12 @@
 # 口琴跟吹助手 HarmonicaFlow — 系统架构方案
 
-- 版本：v0.1.0（草案）
+- 版本：v0.2.0（规划）
 - 日期：2026-10-06
-- 状态：待评审，未开工
+- 状态：**远期规划**——不阻塞当前开发，正文 §5–§9 尚未落地，`apps/*` `packages/*` `services/*` 均为规划目录
 - 关联文档：[PRD](./PRD.md) · [TECH_DESIGN](./TECH_DESIGN.md) · [AI_SCORING](./AI_SCORING.md)
 
+> **阅读须知**：当前项目的实际形态是**纯本地移动端**（见 [TECH_DESIGN.md](./TECH_DESIGN.md) §1 与 [PRD.md](./PRD.md)）。本文描述的是「将来要加后端 / PC 端 / AI 点评时**怎么加**」，属于**路线图与约束**，不是待办清单；只有 §2–§4（边界与降级原则）对当前代码有指导意义，§5–§9 在 P2 之后才实施。
+>
 > 本文回答四个问题：**为什么要加后端、多端怎么分、模块怎么切、AI 层怎么设计**。
 >
 > **本文不锁定 AI 厂商**：全文按 provider-agnostic 设计，只定义契约与适配器插槽，具体选哪家留到开发阶段。原设想中的 Jev（TypeSafe 的 System One 决策模型）经核实**只接收文本、只返回 Choice / Score / Noul 概率，既不生成自然语言、也不接收音频**，与本项目「实时音频多模态 + 生成点评」的诉求不匹配，**已排除**；其「结构化判定 + 置信度」的思路仅作为可选插槽保留（§7.3）。
@@ -23,7 +25,7 @@
 | G4 | AI 由用户自带密钥 | 用户自配 API Key，能接收音频的多模态实时能力 |
 | G5 | 提示词与输出契约统一 | 换模型只改措辞，不改结论；同一份评分输入，不同模型产出的点评结构一致 |
 
-### 1.2 硬约束（在既有约束上强化）
+### 1.2 工程约束（既有约定，不可协商）
 
 | 约束 | 来源 | 对本方案的影响 |
 |---|---|---|
@@ -33,12 +35,14 @@
 | 原生变更必须重新出包 | 既有 | 桌面端与移动端的原生部分各自独立发版 |
 | 纯本地数据、无隐私外传的历史承诺 | 既有 | 上云必须**默认关闭**、逐项可选、可导出可删除 |
 
+> **约束只作用于工程层，不作用于产品行为层。** 上表是语言 / 构建 / 离线承诺这类**技术底线**；而落块方向、视角、皮肤、透明度、横向琴谱、封面来源等**产品行为一律做成可配置项**，各给一套顺手默认值，把选择权交给用户（详见 [PRD.md](./PRD.md) §6.4 与 [TECH_DESIGN.md](./TECH_DESIGN.md) §7.11）。**不用"仅支持 X"这类硬约束去限制用户。**
+
 ### 1.3 非目标
 
 - 不做社交、排行、直播、课程体系。
 - 不做面向第三方的开放平台 / 插件市场。
 - 不承诺 iOS（需要付费开发者账号，仍不在范围）。
-- **本期不动代码**，只产出方案；`apps/*`、`services/*` 均为规划中的目录。
+- **本文不产生代码改动**：`apps/*`、`services/*` 均为规划中的目录，实施节奏见 §11（P1 起）。
 
 ---
 
@@ -53,7 +57,7 @@
 │               ▼                                                    │
 │         packages/core        纯 TS：解析 / 编配 / 音高简谱 /        │
 │               │              音高检测 / 对齐 / 评分 / 时序          │
-│         packages/contracts   数据与 AI 契约（zod schema，单一来源）  │
+│         packages/contracts   数据与 AI 契约（纯 TS 类型，单一来源）  │
 │         packages/prompts     提示词注册表 + 版本 + goldenset        │
 │         packages/ai          Provider 适配器（BYOK，直连厂商）       │
 │         packages/storage     存储抽象（现 docStore 上提）            │
@@ -82,11 +86,11 @@
 | 路径 | 内容 | 现在是否已存在 |
 |---|---|---|
 | `packages/core` | 由现 `src/core` 平移：`parsers/` `arrange` `pitch` `layouts/`，未来加 `audio/pitch` `audio/align` `audio/scoring` | 已有（在 `src/core`） |
-| `packages/contracts` | 全部跨端/跨进程数据契约：`Score` `TabNote` `Prefs` `EvalResult`、**AI 输入输出 schema**、API 请求响应 schema | 规划 |
+| `packages/contracts` | 全部跨端/跨进程数据契约：`Score` `TabNote` `Prefs` `EvalResult`、**AI 输入输出类型**、API 请求响应类型。**只用 TS 类型（编译期零运行时），不引入 zod**；需要运行时校验时由服务端另写校验函数，客户端不为此新增依赖 | 规划 |
 | `packages/prompts` | 提示词注册表（`promptVersion` + 模板 + goldenset） | 规划 |
 | `packages/ai` | Provider 适配器接口 + 各厂商实现 + 降级链 | 规划 |
 | `packages/storage` | 由现 `src/store/docStore.ts` 上提为存储抽象 | 已有（在 `src/store`） |
-| `packages/ui-rn` | 现 `src/ui` `src/theme` `src/player` 中可共享的部分 | 已有（在 `src/ui` 等） |
+| `packages/shared`（原 ui-rn） | **仅收平台无关的纯 TS**：`theme/color.ts` `theme/palette.ts` `theme/skin.ts` `theme/tokens.ts`（纯数据/纯函数）、`player/timing.ts`、`core/visual/*`。**RN 组件（`.tsx`）不上提**——PC 端 UI 不复用 RN 组件，各写各的 | 部分已有（在 `src/theme` `src/player`） |
 | `apps/mobile` | 现项目主体（Expo Router 页面） | 已有 |
 | `apps/desktop` | Electron 壳 + React 渲染进程 | 规划 |
 | `services/api` | 模块化单体后端 | 规划 |
@@ -94,17 +98,18 @@
 ### 3.2 依赖方向（单向，禁止反向）
 
 ```
-apps/*  ──▶ packages/ui-rn ──▶ packages/storage ──▶ packages/ai ──▶ packages/prompts
+apps/*  ──▶ packages/shared ──▶ packages/storage ──▶ packages/ai ──▶ packages/prompts
    │                                                                      │
    └────────────────▶ packages/core ◀────────────────────────────────────┘
                               ▲
-                              │（仅类型/校验函数，无运行时耦合）
+                              │（纯类型，编译期擦除，零运行时耦合）
                         packages/contracts
 ```
 
 规则：
 
-- `core` 与 `contracts` 是**叶子**，只依赖外部纯 JS 库（`fast-xml-parser` / `fflate` / `zod`）。
+- `core` 与 `contracts` 是**叶子**：`core` 只依赖外部纯 JS 库（`fast-xml-parser` / `fflate`）；`contracts` **零依赖**（纯 TS 类型）。
+- `shared` 只放**平台无关纯 TS**（几何令牌、色板纯函数、`core/visual` 与 `timing` 的纯计算），**不放 `.tsx` 组件**，因此 Web / Electron 可安全复用而无需 RN 运行时。
 - `storage` 提供 `readText / writeText / readBytes / list / remove`，上层（含未来同步逻辑）不关心数据落在本地还是远端。
 - **`apps/mobile` 永不 import `apps/desktop` 与 `services/api` 的源码**。
 - 用 ESLint `no-restricted-imports` + `dependency-cruiser` 在 CI 里守边界，不靠自觉。
@@ -147,6 +152,8 @@ apps/*  ──▶ packages/ui-rn ──▶ packages/storage ──▶ packages/a
 
 ## 5. 后端：模块化单体
 
+> ⚠️ **远期章节（P2 起）**：§5–§9 描述的是「决定加后端之后」的设计，**当前不实施、不排期**。当前是纯本地应用，个人使用；这些内容的作用是**把接缝留干净**（见 §2 两条边界与 §4 降级原则），避免将来返工。**不要因为本文写了后端就去做后端。**
+
 ### 5.1 为什么不是微服务（先给结论）
 
 在 **BYOK** 前提下，AI 流量从客户端直连厂商，**不经过后端**；后端只剩账号、曲库、同步、偏好四类读写型 CRUD。这类负载用微服务承载只有代价、没有收益：
@@ -184,7 +191,7 @@ apps/*  ──▶ packages/ui-rn ──▶ packages/storage ──▶ packages/a
 
 ### 5.4 接口风格
 
-- HTTP + JSON，契约由 `packages/contracts` 的 zod schema 单一来源，前后端共享；服务端做入参校验，客户端做响应校验。
+- HTTP + JSON，契约由 `packages/contracts` 的 **TS 类型**单一来源，前后端共享；**运行时校验只在服务端做**（服务端可自选校验库），客户端不因此新增运行时依赖。
 - 同步接口用**游标 + 增量**，不用时间戳（时钟不可靠）。
 - 所有写操作幂等（客户端生成的 `opId`），便于离线重试。
 - 版本化：路径 `/v1`；契约破坏性变更必须新增字段而非改字段。
@@ -456,13 +463,15 @@ interface CommentProvider {
 
 | 阶段 | 内容 | 交付物 | 风险等级 |
 |---|---|---|---|
-| **P0** | 现状：纯本地移动端（已完成） | 可安装 APK + 离线全部功能 | — |
-| **P1** | Monorepo 化：`packages/core` `packages/contracts` `packages/storage` 抽包 | 移动端行为不变、构建仍可通过 | 低 |
+| **P0** | 当前版本：纯本地移动端（进行中，随 PRD 迭代） | 可安装 APK + 离线全部功能 | — |
+| **P1** | Monorepo 化：`packages/core` `packages/contracts` `packages/storage` 抽包。**推迟**——只有一个消费者时收益为零，反而增加构建与调试成本；**等 P3 桌面端真正开写时再抽** | 移动端行为不变、构建仍可通过 | 低（但收益低） |
 | **P2** | 后端骨架：`identity` + `library` + `sync` + `prefs`（模块化单体） | 账号、曲谱云库、跨端同步 | 中 |
-| **P3** | PC 端：Electron 壳 + 复刻跟吹视图 | 桌面可完成「导入 → 编配 → 跟吹」 | 中 |
+| **P3** | PC 端：Electron 壳 + 复刻跟吹视图（**此项触发 P1**） | 桌面可完成「导入 → 编配 → 跟吹」 | 中 |
 | **P4** | AI 点评（一期形态）：BYOK + 文本 LLM + 规则模板降级 | 评测结果页出自然语言点评 | 中（依赖 spike-1） |
 | **P5** | 实时音频（二期形态）：多模态流式 | 吹奏中实时反馈 | 高 |
 | **P6** | 按 §5.6 条件评估是否拆微服务 | — | 视情况 |
+
+> **P1 的取舍**：monorepo 会带来 workspace 配置、TS 路径映射、Metro 解析、EAS 构建四处额外成本，而当前**唯一消费者是移动端自己**——抽包只会让构建变复杂而不产生复用价值。因此把 P1 从"紧接着做"改为"**由 P3 触发**"：先验证 PC 端真要做，再抽包。
 
 ---
 
@@ -478,7 +487,7 @@ interface CommentProvider {
 | 实时音频耗电与流量 | 用户关闭 | 默认关闭、显式开启、会话级开关 |
 | 上传音频的隐私顾虑 | 信任问题 | 默认**不上传音频**（一期只传结构化数值）；如二期需传，逐次显式同意 + 明示去向 |
 | 提示词漂移 | 结果不可复现 | `promptVersion` 随代码版本控制 + goldenset 回归 |
-| 一次性设计过大 | 永远落不了地 | 严格按 P1→P5 推进，每阶段独立可用、可停 |
+| 一次性设计过大 | 永远落不了地 | 只做 P0（当前版本）；P1 由 P3 触发，其余阶段独立可用、可停；§5–§9 仅作接缝参考 |
 
 ---
 

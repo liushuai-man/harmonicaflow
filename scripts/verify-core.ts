@@ -21,6 +21,21 @@ import {
   midiToJianpu,
   midiToNoteName,
 } from '../src/core/pitch';
+import {
+  AHEAD_RATIO_MAX,
+  K_MIN,
+  LABEL_AREA_H,
+  LABEL_AREA_W,
+  PX_PER_SEC,
+  VIEW_ANGLE_MAX,
+  computeViewGeometry,
+  laneOffset,
+  resolveFlow,
+  timeOffset,
+  type FlowDirection,
+  type FlowSetting,
+  type Viewport,
+} from '../src/core/visual';
 
 const ABC_SAMPLE = `X:1
 T:欢乐颂（ABC 片段）
@@ -97,6 +112,112 @@ function describe(score: Score): void {
   }
 }
 
+// ── core/visual：边界与视角几何自检（见 docs/TECH_DESIGN.md §9.1 / §7.11）──
+
+function check(label: string, ok: boolean, detail = ''): void {
+  console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` → ${detail}` : ''}`);
+  if (!ok) process.exitCode = 1;
+}
+
+function verifyCoreVisual(): void {
+  // 1) 边界：视觉参数与几何必须是平台无关纯 TS，才能被 Node 直接验证、被多端复用
+  for (const file of ['params.ts', 'flow.ts', 'index.ts']) {
+    const source = readFileSync(resolve(process.cwd(), 'src/core/visual', file), 'utf8');
+    const clean = !/from\s+['"](react|react-native|expo)/.test(source);
+    check(`core/visual/${file} 不依赖 React / RN / Expo`, clean);
+  }
+
+  // 2) 方向解析：auto 依宽高比选向，视口未就绪时回落 down（不产生 0 宽布局）
+  const flowChecks: [FlowSetting, Viewport, FlowDirection][] = [
+    ['down', { width: 390, height: 844 }, 'down'],
+    ['right', { width: 390, height: 844 }, 'right'],
+    ['auto', { width: 390, height: 844 }, 'down'],
+    ['auto', { width: 900, height: 500 }, 'right'],
+    ['auto', { width: 0, height: 0 }, 'down'],
+  ];
+  for (const [setting, viewport, expected] of flowChecks) {
+    const actual = resolveFlow(setting, viewport);
+    check(
+      `方向 ${setting} @ ${viewport.width}×${viewport.height}`,
+      actual === expected,
+      `${actual}（期望 ${expected}）`,
+    );
+  }
+
+  const viewport: Viewport = { width: 390, height: 844 };
+  const laneCount = 24;
+  const totalMs = 60000;
+  const leadInMs = 2000;
+  const pxPerMs = PX_PER_SEC / 1000;
+
+  // 3) 平铺（θ = 0）：不加透视
+  const flat = computeViewGeometry({
+    direction: 'down',
+    viewport,
+    laneCount,
+    angleDeg: 0,
+    totalMs,
+    leadInMs,
+  });
+  check('平铺分支不加透视', flat !== null && flat.tilt === null);
+  if (flat) {
+    const expectedPlayhead = viewport.height - LABEL_AREA_H;
+    const expectedSongLen = (totalMs + leadInMs) * pxPerMs + expectedPlayhead;
+    check('down 判定线 = 高度 − 标注区', flat.playhead === expectedPlayhead, `${flat.playhead}`);
+    check('down 平移轴为 y', flat.axis === 'y');
+    check('画布总长 = (时长+留白)·px + 判定线', flat.songLen === expectedSongLen, `${flat.songLen}`);
+    check('laneOffset(1) = BLOCK_GAP/2', laneOffset(1, flat.rowSize) === 1.5);
+    check(
+      'timeOffset 为绝对坐标',
+      timeOffset(0, leadInMs, flat.songLen, pxPerMs) === flat.songLen - leadInMs * pxPerMs,
+    );
+  }
+
+  // 4) 横向：判定线取宽度侧，平移轴为 x
+  const sideways = computeViewGeometry({
+    direction: 'right',
+    viewport,
+    laneCount,
+    angleDeg: 22,
+    totalMs,
+    leadInMs,
+  });
+  check('right 判定线 = 宽度 − 标注区', sideways?.playhead === viewport.width - LABEL_AREA_W);
+  check('right 平移轴为 x', sideways?.axis === 'x');
+  check('right 透视轴为 Y', sideways?.tilt?.axis === 'Y');
+
+  // 5) 极端角度 + 极小 k：aheadRatio 不发散、角度被夹在上限
+  const extreme = computeViewGeometry({
+    direction: 'down',
+    viewport,
+    laneCount,
+    angleDeg: 89,
+    totalMs,
+    leadInMs,
+    k: 1,
+  });
+  check('角度被夹在 VIEW_ANGLE_MAX', extreme?.tilt?.degree === VIEW_ANGLE_MAX, `${extreme?.tilt?.degree}`);
+  check(
+    'k 被夹到 K_MIN，ahead 有硬上限且有限',
+    extreme !== null &&
+      Number.isFinite(extreme.ahead) &&
+      extreme.ahead <= extreme.playhead * AHEAD_RATIO_MAX &&
+      K_MIN > 1,
+    `ahead=${extreme?.ahead.toFixed(1)}`,
+  );
+  check('极端角度下透视距离仍为正', (extreme?.tilt?.perspective ?? 0) > 0);
+
+  // 6) 视口/列数未就绪时返回 null，调用方跳过渲染
+  check(
+    '视口未就绪返回 null',
+    computeViewGeometry({ direction: 'down', viewport: { width: 0, height: 0 }, laneCount, angleDeg: 22, totalMs, leadInMs }) === null,
+  );
+  check(
+    '列数为 0 返回 null',
+    computeViewGeometry({ direction: 'down', viewport, laneCount: 0, angleDeg: 22, totalMs, leadInMs }) === null,
+  );
+}
+
 function main(): void {
   const twinkle = parse(loadSample('assets/songs/twinkle.json'), 'twinkle.json', 'twinkle');
   describe(twinkle);
@@ -165,6 +286,10 @@ function main(): void {
     console.log(`${ok ? '✓' : '✗'} 调号 ${key} → 主音音级 ${actual}（期望 ${expected}）`);
     if (!ok) process.exitCode = 1;
   }
+
+  // 视觉几何自检（见 docs/TECH_DESIGN.md §7.11 / §9.1）
+  console.log('\n### core/visual 方向与视角几何自检');
+  verifyCoreVisual();
 }
 
 main();

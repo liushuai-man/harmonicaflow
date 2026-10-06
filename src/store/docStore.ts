@@ -17,6 +17,14 @@ import { simpleHashBytes } from '../core/parsers';
 const WEB_PREFIX = 'harmonicaflow:';
 const IS_WEB = Platform.OS === 'web';
 
+/**
+ * 是否支持把**二进制字节**落到本地缓存。
+ *
+ * Web 端 localStorage 有 5MB 配额，存图片字节会直接撑爆；因此 Web 端只记远程 URL、
+ * 不缓存字节（见 docs/TECH_DESIGN.md §7.10）。原生端走 expo-file-system 沙盒，可以缓存。
+ */
+export const supportsBinaryCache = !IS_WEB;
+
 interface WebStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -64,6 +72,16 @@ export function ensureDir(relative: string): void {
   if (IS_WEB) return;
   const dir = new Directory(Paths.document, ...relative.split('/'));
   if (!dir.exists) dir.create();
+}
+
+/**
+ * 相对路径 → 可直接交给 `<Image source={{ uri }} />` 的本地 URI。
+ * Web 端没有文件系统，返回 null（调用方应回退到远程 URL 或占位图）。
+ */
+export function fileUri(relative: string): string | null {
+  if (IS_WEB) return null;
+  const file = nativeFile(relative);
+  return file.exists ? file.uri : null;
 }
 
 export async function readText(relative: string): Promise<string | null> {

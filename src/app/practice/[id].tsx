@@ -1,6 +1,7 @@
+import * as DocumentPicker from 'expo-document-picker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { arrange } from '../../core/arrange';
@@ -9,11 +10,12 @@ import type { ArrangeResult, Score } from '../../core/model';
 import { keySignatureToTonicPc } from '../../core/pitch';
 import { buildTimeline, type TimelineInfo } from '../../player/timing';
 import { usePlayback } from '../../player/usePlayback';
-import { listLibrary, loadScore, type LibraryEntry } from '../../store/library';
+import { fetchOnlineCover, importLocalCover } from '../../store/coverCache';
+import { listLibrary, loadScore, setCoverUri, type LibraryEntry } from '../../store/library';
 import { usePrefs } from '../../store/prefs';
 import { useTheme } from '../../theme/ThemeProvider';
 import { radius, spacing } from '../../theme/tokens';
-import { Button, Icon, IconTile } from '../../ui/components';
+import { Button, Icon, SongCover } from '../../ui/components';
 import { NoteTimeline } from '../../ui/NoteTimeline';
 import { TransportBar } from '../../ui/TransportBar';
 
@@ -21,7 +23,7 @@ import { TransportBar } from '../../ui/TransportBar';
  * 跟吹页（见 docs/TECH_DESIGN.md §7）
  *
  * 数据流：曲库条目 → 解析出的 Score → arrange 编配 → buildTimeline 时序
- *        → usePlayback 驱动共享值 → NoteTimeline / TransportBar 渲染。
+ *        → usePlayback 驱动共享值 → NoteTimeline / StaffBar / TransportBar 渲染。
  * 偏好统一由 PrefsProvider 提供，设置页改动后本页即时生效。
  */
 export default function PracticeScreen() {
@@ -67,6 +69,38 @@ export default function PracticeScreen() {
     [prefs.layoutId, prefs.layoutOverrides],
   );
 
+  // 在线随机封面：仅在开关打开且本曲还没有封面时拉取一次，成功后写回曲库
+  useEffect(() => {
+    if (!prefs.onlineCover || !entry || entry.coverUri) return;
+    let cancelled = false;
+    (async () => {
+      const uri = await fetchOnlineCover(entry.id);
+      if (cancelled || !uri) return;
+      await setCoverUri(entry.id, uri);
+      if (!cancelled) setEntry((prev) => (prev ? { ...prev, coverUri: uri } : prev));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prefs.onlineCover, entry]);
+
+  const handlePickCover = useCallback(async () => {
+    if (!entry) return;
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: 'image/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled) return;
+      const uri = await importLocalCover(entry.id, picked.assets[0].uri);
+      await setCoverUri(entry.id, uri);
+      setEntry((prev) => (prev ? { ...prev, coverUri: uri } : prev));
+    } catch {
+      // 选图失败不阻塞跟吹
+    }
+  }, [entry]);
+
   useEffect(() => {
     if (!score) return;
     try {
@@ -108,7 +142,15 @@ export default function PracticeScreen() {
           { backgroundColor: colors.surface, borderBottomColor: colors.border },
         ]}
       >
-        <IconTile name="harp" size={38} tone="accent" />
+        <Pressable
+          onPress={handlePickCover}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel="更换封面"
+          style={({ pressed }) => [styles.coverButton, pressed && styles.pressed]}
+        >
+          <SongCover uri={entry?.coverUri} title={entry?.title ?? ''} size={38} />
+        </Pressable>
         <View style={styles.topBarText}>
           <Text style={[styles.layoutName, { color: colors.text }]} numberOfLines={1}>
             {layout.name}
@@ -152,7 +194,9 @@ export default function PracticeScreen() {
             positionMs={positionMs}
             holes={layout.holes}
             tonicPc={tonicPc}
-            perspective={prefs.perspective}
+            flow={prefs.flow}
+            viewAngle={prefs.viewAngle}
+            staffBar={prefs.staffBar}
           />
           <View style={{ paddingBottom: insets.bottom }}>
             <TransportBar
@@ -189,6 +233,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   topBarText: { flex: 1, gap: 2 },
+  coverButton: { borderRadius: radius.sm },
+  pressed: { opacity: 0.6 },
   layoutName: { fontSize: 15, fontWeight: '700' },
   layoutMeta: { fontSize: 12 },
   banner: {

@@ -10,7 +10,7 @@ import { importScore, listLibrary, loadScore, type LibraryEntry } from '../store
 import { usePrefs } from '../store/prefs';
 import { useTheme } from '../theme/ThemeProvider';
 import { elevation, radius, spacing } from '../theme/tokens';
-import { Badge, Button, Card, HarmonicaMark, Icon, IconTile } from '../ui/components';
+import { Badge, Button, Card, HarmonicaMark, Icon, SongCover } from '../ui/components';
 
 interface EntryStats {
   total: number;
@@ -110,7 +110,7 @@ export default function LibraryScreen() {
     return (
       <Card onPress={() => openEntry(item.id)} style={styles.card} accessibilityLabel={item.title}>
         <View style={styles.cardRow}>
-          <IconTile name={builtin ? 'sparkles' : 'music'} tone={builtin ? 'accent' : 'neutral'} />
+          <SongCover uri={item.coverUri} title={item.title} size={44} />
           <View style={styles.cardBody}>
             <View style={styles.cardTitleRow}>
               <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
