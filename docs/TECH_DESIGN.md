@@ -289,9 +289,9 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 - 以 Reanimated 共享值 `positionMs` 承载播放位置，`play()` 用 `withTiming(totalMs, { duration: (totalMs - from)/speed, easing: linear })` 驱动，暂停时 `cancelAnimation` 并从当前值续播。
 - 对外暴露：`positionMs / isPlaying / speed / play / pause / restart / seek(ms) / setSpeed(x)`；倍速档位 `SPEED_OPTIONS = [0.5, 0.75, 1]`。
 
-### 7.3 时间轴渲染（`ui/timeline/`，双向单视图）
+### 7.3 时间轴渲染（`ui/NoteTimeline.tsx`，双向单视图）
 
-- **方向策略**（`flow: 'down' | 'right' | 'auto'`，来自设置，实现见 `ui/timeline/flow.ts`）：把「时间轴 + 判定线 + 音阶标注」抽象成一个 `FlowLayout` 策略（`core/visual/flow.ts` 定义接口与纯几何），两个方向实现**共用同一套**音块分层渲染、可视剔除、触碰特效、命中高亮逻辑，差别只在坐标映射与判定线位置：
+- **方向策略**（`flow: 'down' | 'right' | 'auto'`，来自设置，接口与纯几何见 `core/visual/flow.ts`）：把「时间轴 + 判定线 + 音阶标注」抽象成一个 `FlowLayout` 策略，两个方向实现**共用同一套**音块分层渲染、可视剔除、触碰特效、命中高亮逻辑，差别只在坐标映射与判定线位置：
   - `down`：X = 孔位列，Y = 时间；判定线在**底部**横线；音阶标注在判定线**下方**。
   - `right`：Y = 孔位列，X = 时间；判定线在**右侧**竖线；音阶标注在判定线**右侧**（孔列自上而下依次排列）。
   - `auto`（默认）：按可视区**宽高比**自动选向——竖屏 / 窄窗选 `down`，横屏 / 宽窗选 `right`，随窗口尺寸变化即时重算（纯函数 `resolveFlow(flow, {width, height})`）。方向是**用户可改的偏好**，不是硬约束。
@@ -513,8 +513,7 @@ src/core/parsers/         json.ts · abc.ts · musicxml.ts · index.ts
 src/core/visual/          params.ts（视觉常量）· flow.ts（方向接口 + 几何纯函数）      ← v0.4.0 新增，零 RN 依赖
 src/player/               timing.ts · usePlayback.ts（内部走 TimeSource 接口）
 src/theme/                color.ts · palette.ts · skin.ts · tokens.ts · ThemeProvider.tsx
-src/ui/                   TransportBar.tsx
-src/ui/timeline/          NoteTimeline.tsx · flow.ts（down / right 渲染策略）· StaffBar.tsx（横向琴谱）
+src/ui/                   NoteTimeline.tsx（双向单视图）· StaffBar.tsx（横向琴谱）· TransportBar.tsx（播放控件）
 src/ui/components/        Icon.tsx · Card.tsx · Button.tsx · Badge.tsx · IconTile.tsx · SegmentedControl.tsx · Slider.tsx · Row.tsx · HarmonicaMark.tsx · SongCover.tsx · index.ts
 src/ui/effects/           types.ts · registry.ts · pulse.tsx
 src/store/                docStore.ts（唯一存储边界）· library.ts · prefs.tsx · coverCache.ts

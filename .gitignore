@@ -42,3 +42,6 @@ yarn-error.*
 
 # local scratch
 .init-backup/
+
+# 个人本地 agent 覆盖（冲突时以它为准，见 AGENTS.md 最高优先级 §1）
+AGENTS.LOCAL.md
