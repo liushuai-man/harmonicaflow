@@ -1,8 +1,10 @@
 # 口琴跟吹助手 HarmonicaFlow — 技术方案
 
-- 版本：v0.1.0
-- 日期：2026-10-05
+- 版本：v0.2.0
+- 日期：2026-10-06
 - 关联文档：[PRD.md](./PRD.md)
+
+> v0.2.0 变更摘要：新增 `theme/`（深浅双色板 + 主色派生 + ThemeProvider）；`store/` 引入 `PrefsProvider`（`updatePrefs` 读-合并-写）；`NoteTimeline` **只保留纵向**并新增透视、底部简谱标注、触碰触发的 `ui/effects/` 特效注册表；单词偏好删除 `orientation`，新增 `themeMode / accent / perspective`；出包改走 **EAS 云端构建**（本地不需要 JDK）。
 
 ---
 
@@ -13,29 +15,36 @@
 │ src/app/      页面层（Expo Router）           │
 │   index / practice/[id] / settings            │
 ├──────────────────────────────────────────────┤
+│ theme/        主题层（色板 + Provider）        │
+│   palette / color / ThemeProvider             │
+├──────────────────────────────────────────────┤
 │ ui/           展示组件（无业务逻辑）           │
-│   NoteTimeline / TransportBar                 │
+│   NoteTimeline / TransportBar / effects/      │
 ├──────────────────────────────────────────────┤
 │ player/       时序与播放状态机                 │
 │   timing / usePlayback                        │
 ├──────────────────────────────────────────────┤
 │ store/        持久化（expo-file-system）       │
+│   library / prefs（Provider）                  │
 ├──────────────────────────────────────────────┤
 │ core/         纯 TS，零 UI 依赖，可 Node 验证  │
 │   parsers/  →  Score                          │
 │   arrange   →  TabNote[]                      │
+│   pitch     →  音名 / MIDI / 简谱              │
 │   layouts/  →  音阶预设数据                    │
 └──────────────────────────────────────────────┘
 ```
 
-关键边界：`core/` 不 import 任何 React / RN / Expo 模块，因此可以脱离设备用 Node 脚本验证解析与编配的正确性。
+关键边界：`core/` 不 import 任何 React / RN / Expo 模块，因此可以脱离设备用 Node 脚本验证解析、编配与简谱转换的正确性。
 
 数据流：
 
 ```
 文件字节 ──parsers──▶ Score(NoteEvent[]) ──arrange──▶ TabNote[] ──ui──▶ 音块时间轴
-                                                     ▲
-                                        HarmonicaLayout(预设, 可编辑)
+                                                     ▲                        │
+                                        HarmonicaLayout(预设, 可编辑)          │ 触碰判定线
+                                                                              ▼
+                                                              effects/ 按列播放特效
 ```
 
 ---
@@ -55,6 +64,21 @@
 
 > 音名与 MIDI 互转自行实现（12 半音表），不引入 `@tonaljs/*`。
 > 全部依赖均可在 **Expo Go** 中运行，无需自定义原生构建。
+> v0.2.0 未新增运行时依赖：主题、透视、特效、简谱均为纯 JS/TS 实现。
+
+### 2.1 出包方式（EAS 云端构建）
+
+RN/Expo 打 Android 包在本地必然依赖 JDK（Gradle/AGP 运行在 JVM 上），换 Python/Go 重写等于废弃现有代码。因此**出包走 EAS 云端构建**，本机不安装 Java：
+
+```
+bunx eas-cli login          # 首次需 Expo 账号
+bunx eas-cli build --platform android --profile preview    # 云端出 APK
+bunx eas-cli build --platform android --profile production # 出 AAB 上架
+```
+
+- `eas.json` 提供 `development / preview / production` 三档 profile（`preview` 出可直接安装的 APK）。
+- 本机仍可 `npx expo start` 用 Expo Go 扫码做真机联调，无需任何原生工具链。
+- 原生工程由 **CNG** 在云端生成；`android/` `ios/` 依旧不手改。
 
 ---
 
@@ -236,29 +260,78 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 - 以 Reanimated 共享值 `positionMs` 承载播放位置，`play()` 用 `withTiming(totalMs, { duration: (totalMs - from)/speed, easing: linear })` 驱动，暂停时 `cancelAnimation` 并从当前值续播。
 - 对外暴露：`positionMs / isPlaying / speed / play / pause / restart / seek(ms) / setSpeed(x)`；倍速档位 `SPEED_OPTIONS = [0.5, 0.75, 1]`。
 
-### 7.3 时间轴渲染（`ui/NoteTimeline.tsx`）
+### 7.3 时间轴渲染（`ui/NoteTimeline.tsx`，纵向单视图）
 
 - 用一个 `Animated.View` 包裹整块 `<Svg>` 承载整体平移（而非动画 SVG 内部的 `<G>`，以规避 SVG 内部 transform 动画的兼容风险）；**只有 1 个动画节点**，滚动在 UI 线程完成，不触发 React 重渲染。
 - **窗口化**：`useAnimatedReaction` 监听 `positionMs`，每 500ms 通过 `runOnJS` 回传一次锚点，JS 侧重算可视音块集合（约 ±1 屏），控制节点数 < 40。
-- 坐标（横向，`PX_PER_SEC_H = 90`）：
+- 坐标（纵向，`PX_PER_SEC_V = 160`）：
 
   ```
-  x = playhead + (startMs + LEAD_IN_MS - anchorMs) * pxPerMs
-  w = max(durationMs * pxPerMs, MIN_BLOCK_PX)
-  y = (holeCount - hole) * rowSize
+  h      = max(durationMs * pxPerMs, MIN_BLOCK_PX)
+  bottom = ahead - (startMs + LEAD_IN_MS - anchorMs) * pxPerMs
+  y      = bottom - h
+  x      = (hole - 1) * rowSize
   ```
 
-  纵向（`PX_PER_SEC_V = 160`）交换语义：`h` 由时值决定，`x = (hole - 1) * rowSize`，方块自下向上流入演奏线。
-- 配色：吹 = 暖色（橙 `#F2994A`），吸 = 冷色（蓝 `#2F80ED`），推键为对应亮色，不可吹 = 灰色虚线描边并计入顶部提示。
-- 行序（横向）：孔号小者在下、大者在上，符合"从低音孔到高音孔由下往上"的直觉。
+  方块自下向上流动的组合位移由 `translateY = playhead - ahead + delta` 统一驱动。
+- 配色统一取主题色板（`theme/`）：吹 = 暖色、吸 = 冷色、推键为对应亮色，不可吹 = 弱化描边；不再在组件内硬编码色值。
+- 判定线：位于 `playhead = height * 0.82`，颜色取 `theme.playhead`。
+
+### 7.4 纵向透视（近大远小）
+
+SVG 仅支持 2D 仿射，做不了真透视；因此把透视施加在**包裹 Svg 的容器**上：
+
+```
+transform: [{ perspective: P }, { rotateX: 'θ' }]
+transformOrigin: '50% 100%'
+```
+
+- 以底部为原点旋转，底部保持不动、越往上越"后退"，形成近大远小。
+- 强度做成设置项 `perspective: 'off' | 'weak' | 'strong'`（默认 `weak`），映射到 `(P, θ)` 两组参数，便于真机微调。
+- 已知代价：块内文字会随容器一起倾斜（属可接受的视觉风格）；如后续需要文字始终保持正视，可改为对每列单独做 2D 梯形缩放。
+- 该变换只作用于展示容器，不影响时序与命中计算（判定线仍按未变换坐标计算）。
+
+### 7.5 触碰特效（`ui/effects/`）
+
+- **触发**：纵向判定线对应 `note.startMs`。以 `useAnimatedReaction` 监听 `positionMs` 越过各接触时刻（跨桶判断），`runOnJS` 触发一次特效实例。
+- **渲染**：特效实例记录 `{ id, hole, action, bornAt }`，在判定线该列位置渲染约 300ms 后自动移除；不阻塞主时间轴动画。
+- **可插拔**：`effects/types.ts` 定义 `TimelineEffect` 接口（`name` + `render(ctx)`），`effects/registry.ts` 维护注册表，`effects/pulse.tsx` 为默认"脉冲环"。以后新增特效只需注册新实现，不改动 `NoteTimeline`。
+- 颜色取该音所在 `action` 的主题色，与音块保持一致。
+
+### 7.6 底部简谱标注
+
+- `core/pitch.ts` 新增 `midiToJianpu(midi, tonicPc)`：返回音级 `1-7`、临时记号（`#`/`b`）、八度偏移（相对主音八度），八度用上/下小圆点表示（`·1` / `1̣`）。
+- 主音取自 `score.keySignature`（缺省 C）。
+- 时间轴底部按孔列同时显示该孔 **吹 / 吸** 两个简谱度数（半音阶含推键），供用户对照实体琴。
+
+### 7.7 主题系统（`theme/`）
+
+- `theme/color.ts`：无依赖的 HSL 工具，负责按主色 `accent` 派生浅/深两套变体（调整明度/饱和度，保证对比度）。
+- `theme/palette.ts`：色板键 `background / surface / surfaceAlt / text / textMuted / border / accent / accentSoft / onAccent / blow / blowPush / draw / drawPush / infeasible / playhead / success / danger`；导出 `lightPalette` / `darkPalette`。
+- `theme/ThemeProvider.tsx`：接收 `mode: 'system' | 'light' | 'dark'` 与 `accent`，经 `useColorScheme()` 解析出最终 `scheme`，`useMemo` 生成色板并通过 Context 下发；对外暴露 `useTheme()` 返回 `{ scheme, colors }`。
+- 全部组件样式中的硬编码色值改为从 `useTheme()` 取值；静态 `StyleSheet` 只保留尺寸/布局。
+- 切换深浅或改主色即时生效（Context 驱动重渲染），无需重启。
 
 ---
 
 ## 8. 持久化（`store/library.ts`）
 
+用户偏好：`prefs.json`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `layoutId` | `string` | 当前口琴预设 |
+| `speed` | `number` | 播放倍速（0.5 / 0.75 / 1） |
+| `themeMode` | `'system' \| 'light' \| 'dark'` | 主题模式 |
+| `accent` | `string` | 主色（hex），缺省为品牌蓝 |
+| `perspective` | `'off' \| 'weak' \| 'strong'` | 纵向透视强度 |
+| `layoutOverrides` | `Record<string, Hole[]>` | 音阶表校对覆盖，按 layoutId 存放 |
+
+- 旧字段 `orientation` 已移除；读取时忽略未知字段，缺失字段回落到默认值（向后兼容旧 `prefs.json`）。
+- 为避免设置页与主题层互相覆盖，新增 `store/prefs.tsx` 的 `PrefsProvider` / `usePrefs()`，写操作一律走 `updatePrefs(patch)`（读-合并-写），主题与设置页共用同一份状态。
+
 - 曲库索引：`Paths.document + 'library.json'`，存 `LibraryEntry[] = { id, title, source, origin, fileName, noteCount, importedAt }`。
 - 导入的原始文件复制到 `Paths.document + 'scores/{id}.{ext}'` 保存，重复导入以 `File.md5` 内容哈希去重（哈希命中则不重复写盘）。
-- 用户偏好：`prefs.json`，含 `layoutId / orientation / speed / layoutOverrides`（音阶表校对覆盖，按 layoutId 存放）。
 - 内置示例曲随包发布（`assets/songs/*.json`），以 `builtin:` 前缀虚拟成条目，**不复制到文件系统**；`arrange` 统计在首页后台分帧计算，不落盘。
 - 全部走 expo-file-system 新 API（`File` / `Directory` / `Paths`），不引入 AsyncStorage。
 
@@ -269,12 +342,16 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 1. **核心逻辑（无 UI）**：`npx tsx scripts/verify-core.ts`，用示例曲与 MusicXML 样本跑 `parse → arrange`，打印 markdown 表格，人工核对音高、时值、孔位、吹吸。
 2. **构建自检**：`npx tsc --noEmit`（类型）→ `npx expo-doctor`（依赖与配置）→ `npx expo export --platform android`（Metro 能解析全部依赖并打包）。
 3. **端到端**：`npx expo start` → Expo Go：
-   - 首页点内置示例曲 → 跟吹页方块随时间平滑移动、长度随时值变化、横/纵切换正常；
+   - 首页点内置示例曲 → 跟吹页方块随时间平滑下落、长度随时值变化、底部简谱标注正确；
+   - 切换主题（跟随系统/浅/深）与主色，确认整屏配色即时更新；
+   - 切换透视强度（关/弱/强），确认真机观感并选定默认值；
+   - 播放时确认方块触碰判定线触发特效，且不影响帧率；
    - 导入 `.json` / `.abc` / `.musicxml`，确认自动解析并标记不可吹音；
    - 切换三种预设，确认孔位与吹吸映射随之变化；
    - 设置页改音阶表并保存，返回跟吹页确认指法即时重排。
 4. **长曲性能**：3 分钟以上曲目滚动无卡顿，验证窗口化与 UI 线程动画生效。
 5. **音阶表校对**：用实体琴逐孔核对默认预设，不符处经设置页修正后再次验证编配结果。
+6. **出包验证**：`bunx eas-cli build --platform android --profile preview` 云端出 APK，安装到真机确认可运行（本地无需 JDK）。
 
 ---
 
@@ -286,9 +363,12 @@ src/core/                 model.ts · pitch.ts · arrange.ts
 src/core/layouts/         tremolo24C.ts · diatonic10C.ts · chromatic12C.ts · index.ts
 src/core/parsers/         json.ts · abc.ts · musicxml.ts · index.ts
 src/player/               timing.ts · usePlayback.ts
+src/theme/                color.ts · palette.ts · ThemeProvider.tsx
 src/ui/                   NoteTimeline.tsx · TransportBar.tsx
-src/store/                library.ts
+src/ui/effects/           types.ts · registry.ts · pulse.tsx
+src/store/                library.ts · prefs.tsx
 assets/songs/             内置示例曲 JSON
 scripts/verify-core.ts    核心逻辑验证脚本
+eas.json                  EAS 构建 profile（development / preview / production）
 docs/                     PRD.md · TECH_DESIGN.md
 ```
