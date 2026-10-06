@@ -1,0 +1,62 @@
+name: Deploy Web (GitHub Pages)
+
+# PC 端交付：导出 Web 静态站点并发布到 GitHub Pages。
+# 纯本地构建，不需要任何密钥。
+#
+# 前置：仓库 Settings → Pages → Source 选择 "GitHub Actions"（见 README §10）。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 导出静态站点
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 导出 Web 站点（输出到 dist/）
+        run: npx expo export --platform web
+
+      - name: 适配 GitHub Pages
+        # .nojekyll：Expo 产物含 _expo/ 等下划线开头的目录，Jekyll 默认会忽略它们。
+        # 404.html：SPA 单页输出没有服务端 rewrite，复制一份入口页让深链接也能打开。
+        run: |
+          touch dist/.nojekyll
+          cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: 发布到 Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
