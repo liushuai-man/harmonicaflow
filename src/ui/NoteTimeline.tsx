@@ -8,13 +8,22 @@ import Animated, {
   useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Defs,
+  G,
+  Line,
+  LinearGradient,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 
 import type { Hole, TabAction, TabNote } from '../core/model';
 import { midiToJianpuText } from '../core/pitch';
 import { LEAD_IN_MS, type TimelineInfo } from '../player/timing';
 import type { PerspectiveLevel } from '../store/library';
 import { useTheme } from '../theme/ThemeProvider';
+import { adjustLightness, withAlpha } from '../theme/color';
 import type { Palette } from '../theme/palette';
 import { getEffect } from './effects/registry';
 import type { EffectContext } from './effects/types';
@@ -106,6 +115,44 @@ function blockColor(colors: Palette, action: TabAction): string {
   }
 }
 
+/**
+ * 音块渐变的三档色阶（顶亮 → 主色 → 底暗）。
+ * 只在 `<Defs>` 里按动作类型各定义一次；渐变默认用 objectBoundingBox 单位，
+ * 因此同一个 id 能被任意尺寸的音块复用，不会随窗口化增加节点。
+ */
+interface BlockTone {
+  id: string;
+  top: string;
+  mid: string;
+  bottom: string;
+}
+
+function makeTone(id: string, base: string): BlockTone {
+  return {
+    id,
+    top: adjustLightness(base, 0.15),
+    mid: base,
+    bottom: adjustLightness(base, -0.13),
+  };
+}
+
+/** 推键动作：用更亮的渐变 + 内侧高光描边区分，替代易出兼容问题的 SVG pattern */
+function isPushAction(action: TabAction): boolean {
+  return action === 'blowPush' || action === 'drawPush';
+}
+
+/** 渐变 id 用静态字符串：`url(#…)` 引用不了含冒号的 id（如 React.useId 的输出） */
+const GRAD_ID: Record<TabAction | 'infeasible', string> = {
+  blow: 'tlGradBlow',
+  blowPush: 'tlGradBlowPush',
+  draw: 'tlGradDraw',
+  drawPush: 'tlGradDrawPush',
+  infeasible: 'tlGradMuted',
+};
+
+/** 顶部高光带共用的白色渐变（上亮下透明） */
+const SHEEN_ID = 'tlSheen';
+
 export function NoteTimeline({
   notes,
   timeline,
@@ -121,6 +168,18 @@ export function NoteTimeline({
 
   const holeCount = holes.length;
   const effect = getEffect();
+
+  /** 音块渐变定义（随主题色板重建），在 `<Defs>` 里各渲染一次 */
+  const tones = useMemo(
+    () => [
+      makeTone(GRAD_ID.blow, colors.blow),
+      makeTone(GRAD_ID.blowPush, colors.blowPush),
+      makeTone(GRAD_ID.draw, colors.draw),
+      makeTone(GRAD_ID.drawPush, colors.drawPush),
+      makeTone(GRAD_ID.infeasible, colors.infeasible),
+    ],
+    [colors],
+  );
 
   // UI 线程上的播放位置 → 低频同步到 JS，用于重算可视窗口
   useAnimatedReaction(
@@ -307,6 +366,21 @@ export function NoteTimeline({
                 ]}
               >
                 <Svg width={geometry.width} height={geometry.songH}>
+                  {/* 音块渐变只在 Defs 里各定义一次；objectBoundingBox 单位可被任意尺寸音块复用 */}
+                  <Defs>
+                    {tones.map((tone) => (
+                      <LinearGradient key={tone.id} id={tone.id} x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor={tone.top} />
+                        <Stop offset="0.55" stopColor={tone.mid} />
+                        <Stop offset="1" stopColor={tone.bottom} />
+                      </LinearGradient>
+                    ))}
+                    <LinearGradient id={SHEEN_ID} x1="0" y1="0" x2="0" y2="1">
+                      <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.5} />
+                      <Stop offset="1" stopColor="#FFFFFF" stopOpacity={0} />
+                    </LinearGradient>
+                  </Defs>
+
                   {/* 列轨道：偶数列淡底 + 列间分隔线，便于对准孔位 */}
                   {holes.map((hole, index) =>
                     index % 2 === 0 ? (
@@ -334,50 +408,87 @@ export function NoteTimeline({
                     ) : null,
                   )}
 
-                  {/* 音块：底色 + 顶部高光，做出一点立体感 */}
+                  {/*
+                    音块分层：投影 → 渐变主体 → 顶部高光 → 底部色阶（推键再加内侧描边）。
+                    全部是静态元素，不引入逐块动画，符合 §7.3「只有 1 个动画节点」。
+                  */}
                   {blocks.map((block) => {
                     const { note } = block;
-                    const fill = note.feasible ? blockColor(colors, note.action) : colors.infeasible;
+                    const feasible = note.feasible;
+                    const gid = feasible ? GRAD_ID[note.action] : GRAD_ID.infeasible;
+                    // 被透视压扁的远端小块只画主体，避免出现噪点
+                    const detailed = block.w >= 14 && block.h >= 14;
                     return (
-                      <Rect
-                        key={note.id}
-                        x={block.x}
-                        y={block.y}
-                        width={block.w}
-                        height={block.h}
-                        rx={4}
-                        fill={fill}
-                        stroke={note.feasible ? 'transparent' : colors.infeasibleBorder}
-                        strokeWidth={note.feasible ? 0 : 1.5}
-                        strokeDasharray={note.feasible ? undefined : '3 3'}
-                      />
+                      <G key={note.id}>
+                        {detailed ? (
+                          <Rect
+                            x={block.x}
+                            y={block.y + 1.5}
+                            width={block.w}
+                            height={block.h}
+                            rx={5}
+                            fill={withAlpha(colors.shadow, 0.18)}
+                          />
+                        ) : null}
+                        <Rect
+                          x={block.x}
+                          y={block.y}
+                          width={block.w}
+                          height={block.h}
+                          rx={5}
+                          fill={`url(#${gid})`}
+                          stroke={feasible ? withAlpha('#FFFFFF', 0.3) : colors.infeasibleBorder}
+                          strokeWidth={feasible ? 1 : 1.5}
+                          strokeDasharray={feasible ? undefined : '3 3'}
+                        />
+                        {detailed ? (
+                          <Rect
+                            x={block.x + 2}
+                            y={block.y + 1.5}
+                            width={Math.max(block.w - 4, 1)}
+                            height={Math.max(block.h * 0.4, 3)}
+                            rx={3}
+                            fill={`url(#${SHEEN_ID})`}
+                          />
+                        ) : null}
+                        {detailed ? (
+                          <Rect
+                            x={block.x + 2}
+                            y={block.y + block.h - 3}
+                            width={Math.max(block.w - 4, 1)}
+                            height={2}
+                            rx={1}
+                            fill={withAlpha('#000000', 0.16)}
+                          />
+                        ) : null}
+                        {feasible && isPushAction(note.action) && block.w >= 20 && block.h >= 20 ? (
+                          <Rect
+                            x={block.x + 3}
+                            y={block.y + 3}
+                            width={Math.max(block.w - 6, 1)}
+                            height={Math.max(block.h - 6, 1)}
+                            rx={3}
+                            fill="none"
+                            stroke={withAlpha('#FFFFFF', 0.5)}
+                            strokeWidth={1}
+                          />
+                        ) : null}
+                      </G>
                     );
                   })}
-                  {blocks.map((block) =>
-                    block.note.feasible && block.h >= 12 && block.w >= 12 ? (
-                      <Rect
-                        key={`${block.note.id}-gloss`}
-                        x={block.x + 2}
-                        y={block.y + 2}
-                        width={Math.max(block.w - 4, 1)}
-                        height={Math.min(block.h * 0.32, 7)}
-                        rx={2}
-                        fill="#FFFFFF"
-                        fillOpacity={0.22}
-                      />
-                    ) : null,
-                  )}
 
                   {blocks.map((block) => {
                     const { note } = block;
-                    const labelFits = block.w >= 18 && block.h >= 14;
+                    const labelFits = block.w >= 18 && block.h >= 16;
                     if (!labelFits) return null;
                     return (
                       <SvgText
                         key={`${note.id}-label`}
                         x={block.x + block.w / 2}
-                        y={block.y + 13}
+                        // 垂直居中：避开顶部高光带，长短音块都好看
+                        y={block.y + block.h / 2 + 3.5}
                         fontSize={block.w >= 26 ? 10 : 8}
+                        fontWeight="600"
                         fill={note.feasible ? colors.onAccent : colors.infeasibleText}
                         textAnchor="middle"
                       >

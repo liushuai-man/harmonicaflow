@@ -278,7 +278,13 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
   ```
 
   画布 `top = playhead - songH`，配合 `translateY = positionMs * pxPerMs`，屏幕位置折算为 `playhead + (positionMs - startMs - LEAD_IN_MS) * pxPerMs`，与原窗口化公式等价。
-- 配色统一取主题色板（`theme/`）：吹 = 暖色、吸 = 冷色、推键为对应亮色，不可吹 = 弱化描边；不再在组件内硬编码色值。
+- 配色统一取主题色板（`theme/`）：吹 = 暖色、吸 = 冷色、推键为对应亮色，不可吹 = 弱化描边；不在组件内硬编码色值。
+- **音块分层渲染**（全部静态元素，不引入逐块动画，满足上面的"单动画节点"约束）：
+  - `<Defs>` 里按动作类型各定义一次 `LinearGradient`（`blow / blowPush / draw / drawPush / infeasible`，色阶由 `theme/color.adjustLightness` 从主色派生：顶亮 → 主色 → 底暗），另加一条共用的白色高光渐变；渐变用默认的 `objectBoundingBox` 单位，**同一个 id 被任意尺寸音块复用**，节点数不随窗口化增长。
+  - 每块由 `<G>` 包裹多层：投影（下沉 1.5px 的半透明 Rect）→ 渐变主体 → 顶部高光带 → 底部色阶线；推键额外叠加一圈内侧白色描边（不用 SVG `pattern`，规避 Android 兼容风险）。
+  - 被透视压扁的远端小块（`w < 14` 或 `h < 14`）只画主体，避免远场出现噪点；音名标签垂直居中，避开顶部高光带。
+  - 不使用 SVG `filter`（`feDropShadow` / `feGaussianBlur`）——在 react-native-svg 的 Android 实现上不可靠且开销大。
+  - 渐变 id 必须是 URL 安全字符串：`url(#…)` 引用不了含冒号的 id（如 `React.useId()` 的输出）。
 - 判定线：位于 `playhead = height - LABEL_AREA_H`（底部留出 42px 简谱标注区），颜色取 `theme.playhead`。
 - 判定线上方的可视区单独用一个带 `overflow: hidden` 的容器包裹，方块越过判定线后即被裁掉，形成"压线即命中"的观感。
 
