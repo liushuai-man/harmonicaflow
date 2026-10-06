@@ -56,6 +56,7 @@ src/store/            曲库与偏好持久化
 assets/songs/         内置示例曲
 docs/                 PRD 与技术方案
 scripts/verify-core.ts  核心逻辑自检脚本（无 UI，Node 直接跑）
+.github/workflows/    CI/CD：质量门禁 / EAS 出包 / Web 发布到 GitHub Pages
 eas.json              EAS 构建档位
 ```
 
@@ -240,3 +241,61 @@ npx eas-cli@latest update --channel preview --message "..." --environment previe
 - **只取单声部旋律**：同一时刻的和弦保留最高音。
 - **仅 Android 出包**：iOS 需要付费的 Apple 开发者账号与证书，暂未纳入。
 - 浏览器端（`expo start --web`）不作为支持目标，跟吹页的动效与视口表现以真机为准。
+
+---
+
+## 10. CI/CD 与部署（GitHub Actions）
+
+`.github/workflows/` 下三条流水线，把「质量门禁 → 出包 → 发布」自动化：
+
+| 工作流 | 触发 | 作用 | 需要密钥 |
+|---|---|---|---|
+| [ci.yml](./.github/workflows/ci.yml) | 推送 `main`、PR、手动 | `npm ci` → `tsc --noEmit` → `npm run verify` → `expo-doctor` | 否 |
+| [eas-build.yml](./.github/workflows/eas-build.yml) | 手动（选档位）、推送 `v*` 标签 | 调 EAS 云端出 Android 包（`preview` = 可直装 APK，`production` = 上架 AAB） | **`EXPO_TOKEN`** |
+| [deploy-web.yml](./.github/workflows/deploy-web.yml) | 推送 `main`、手动 | `expo export --platform web` → 发布到 GitHub Pages | 否 |
+
+### 10.1 一次性准备
+
+**① 移动端：绑定 EAS 项目并配置 `EXPO_TOKEN`**
+
+```bash
+npx eas-cli@latest login
+npx eas-cli@latest init      # 向 app.json 写入 extra.eas.projectId，属于需要提交的改动
+```
+
+到 https://expo.dev/settings/access-tokens 生成 Access Token，再到 GitHub 仓库
+`Settings → Secrets and variables → Actions → New repository secret`，新建名为
+**`EXPO_TOKEN`** 的 Secret。
+
+> 没有 `extra.eas.projectId` 时 `eas-build.yml` 会**直接失败并打印提示**，不会静默跳过。
+
+**② PC 端：开启 Pages**
+
+仓库 `Settings → Pages → Build and deployment → Source` 选 **GitHub Actions**
+（不要选 "Deploy from a branch"，本方案用 Actions 上传产物）。
+
+### 10.2 日常使用
+
+```bash
+git push origin main        # 自动跑 CI + 发布 Web 到 Pages
+```
+
+- **移动端出包**：仓库 `Actions → EAS Build (Android) → Run workflow`，选 `preview` 拿 APK 下载链接；
+  或打标签出正式包：`git tag v0.2.0 && git push origin v0.2.0`（自动按 `production` 出 AAB）。
+- **PC 端访问**：https://liushuai-man.github.io/harmonicaflow/
+
+### 10.3 Web 部署的几个关键点
+
+- **输出模式取 `single`（SPA），不能用 `static`**：跟吹页是动态路由 `practice/[id]`，`id` 来自用户本地导入的曲目，构建期无法用 `generateStaticParams` 预生成 HTML。
+- **`experiments.baseUrl = "/harmonicaflow"`**：Pages 站点挂在「仓库名」子路径下，不配这个资源路径会 404（已实测产物为 `/harmonicaflow/_expo/...`）。
+- 工作流里做了两处 GitHub Pages 专属适配：`touch dist/.nojekyll`（否则 Jekyll 会忽略 `_expo/` 这类下划线目录）、`cp dist/index.html dist/404.html`（SPA 没有服务端 rewrite，靠 404 回退支持深链接）。
+- ⚠️ **Web 版不是完整功能**：跟吹页时间轴在浏览器里渲染不出来（视口高度恒为 0），Pages 上只是残缺 demo，效果以真机为准。
+
+### 10.4 数据与后端
+
+当前**没有后端**，运行时不依赖网络：
+
+- 设置（主题 / 主色 / 透视强度 / 口琴预设 / 音阶表）与导入的乐谱，统一经 `src/store/docStore.ts` 落盘；
+- 原生走 `expo-file-system` 应用沙盒，Web 走浏览器 `localStorage`；
+- 因此：**卸载 App 或清除浏览器站点数据会丢失数据**；且 Web 与原生各存各的，互不同步。
+  后续若要跨端同步，`docStore.ts` 是唯一改造入口。
