@@ -1,0 +1,50 @@
+name: EAS Build (Android)
+
+# 移动端交付：在 EAS 云端出包（本地不装 JDK / Android Studio）。
+# 手动触发可选档位；推送 v* 标签时按 production 出 AAB。
+#
+# 前置：仓库 Secrets 里有 EXPO_TOKEN，且 app.json 已绑定 extra.eas.projectId
+# （见 README §10）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 构建档位（preview = 可直装 APK，production = 上架 AAB）
+        type: choice
+        options: [preview, production]
+        default: preview
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: eas-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 云端出包
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 检查 EAS 项目是否已绑定
+        run: |
+          node -e "const c = require('./app.json').expo; if (!c.extra?.eas?.projectId) { console.error('app.json 缺少 extra.eas.projectId：请先在本地执行 npx eas-cli@latest login 与 npx eas-cli@latest init，提交改动后再重跑本工作流（见 README §10）'); process.exit(1); }"
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: EAS 云端构建
+        # 标签触发时 github.event.inputs.profile 为空，回落到 production
+        run: eas build --platform android --profile ${{ github.event.inputs.profile || 'production' }} --non-interactive
