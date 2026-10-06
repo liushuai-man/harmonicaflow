@@ -2,7 +2,7 @@
 
 - 版本：v0.2.0
 - 日期：2026-10-06
-- 关联文档：[PRD.md](./PRD.md)
+- 关联文档：[PRD.md](./PRD.md) · [ARCHITECTURE.md](./ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，规划中）
 
 > v0.2.0 变更摘要：新增 `theme/`（深浅双色板 + 主色派生 + ThemeProvider）；`store/` 引入 `PrefsProvider`（`updatePrefs` 读-合并-写）；`NoteTimeline` **只保留纵向**并新增透视、底部简谱标注、触碰触发的 `ui/effects/` 特效注册表；单词偏好删除 `orientation`，新增 `themeMode / accent / perspective`；出包改走 **EAS 云端构建**（本地不需要 JDK）。
 
@@ -36,6 +36,8 @@
 ```
 
 关键边界：`core/` 不 import 任何 React / RN / Expo 模块，因此可以脱离设备用 Node 脚本验证解析、编配与简谱转换的正确性。
+
+> 后续演进：`core/` `store/` 将上提为 monorepo 的 `packages/core` `packages/storage`，供 PC 端（Electron）复用，目录划分与多端方案见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。**本文描述的分层内部设计不变**。
 
 数据流：
 

@@ -2,7 +2,7 @@
 
 > 版本 v0.1.0（草案） · 2026-10-06 · 状态：待评审，未开工
 >
-> 关联文档：[PRD](./PRD.md) · [TECH_DESIGN](./TECH_DESIGN.md)（§11 构建与部署）
+> 关联文档：[PRD](./PRD.md) · [TECH_DESIGN](./TECH_DESIGN.md)（§11 构建与部署） · [ARCHITECTURE](./ARCHITECTURE.md)（系统架构：AI 层分层、实时音频分期、提示词契约）
 
 ---
 
@@ -230,6 +230,8 @@ interface NoteEval {
 **硬约束**：**绝不能把 API key 打进 App 包里**（可被反编译提取并盗刷）。
 
 **降级**：`commentLlm` 与 `comment` 共用同一接口，无网络 / 无 key / 请求失败时自动回落到规则模板。
+
+> **决策已定**（详见 [ARCHITECTURE](./ARCHITECTURE.md) §7）：选 **BYOK**，不做平台统一 Key；模型**不参与打分**，只做语言化包装；提示词与输出 schema 的版本化规范见该文档 §9。本文 §10 的 **spike-1** 是该路线能否推进的前置条件。
 
 ---
 
