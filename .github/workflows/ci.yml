@@ -1,6 +1,6 @@
 name: CI
 
-# 质量门禁：类型检查 + 核心逻辑自检 + 依赖体检。
+# 质量门禁：类型检查 + 代码规范 + 核心逻辑自检 + 依赖体检。
 # 不依赖任何密钥，PR 与主分支推送都会跑。
 
 on:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   checks:
-    name: 类型检查 / 核心自检 / 依赖体检
+    name: 类型检查 / 代码规范 / 核心自检 / 依赖体检
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,10 @@ jobs:
       - name: 类型检查
         run: npx tsc --noEmit
 
-      - name: 核心逻辑自检（解析 / 编配 / 简谱）
+      - name: 代码规范检查（ESLint）
+        run: npm run lint
+
+      - name: 核心逻辑自检（解析 / 编配 / 简谱 / 视觉几何）
         run: npm run verify
 
       - name: 依赖与配置体检
