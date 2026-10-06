@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeProvider';
@@ -20,12 +20,10 @@ export interface SongCoverProps {
 
 export function SongCover({ uri, title, size, radius }: SongCoverProps) {
   const { colors } = useTheme();
-  const [failed, setFailed] = useState(false);
+  // 记「哪张图加载失败」而不是布尔量：换 uri 时判定自动失效，无需 effect 重置
+  const [failedUri, setFailedUri] = useState<string | null>(null);
 
-  useEffect(() => {
-    setFailed(false);
-  }, [uri]);
-
+  const failed = !!uri && failedUri === uri;
   const corner = radius ?? Math.round(size / 4);
   const initial = title.trim().slice(0, 1) || '♪';
 
@@ -46,7 +44,7 @@ export function SongCover({ uri, title, size, radius }: SongCoverProps) {
         <Image
           source={{ uri }}
           style={{ width: size, height: size, borderRadius: corner }}
-          onError={() => setFailed(true)}
+          onError={() => setFailedUri(uri ?? null)}
           resizeMode="cover"
         />
       ) : (
