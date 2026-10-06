@@ -5,6 +5,7 @@
 - 技术栈：Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · Reanimated 4 · react-native-svg
 - 交付形态：安装到 Android 手机的独立 App（出包走 EAS 云端构建，**本地不需要装 Java/Android Studio**）
 - 详细设计：[docs/PRD.md](./docs/PRD.md)（需求）· [docs/TECH_DESIGN.md](./docs/TECH_DESIGN.md)（技术方案，**§11 为构建与部署方案**）· [docs/AI_SCORING.md](./docs/AI_SCORING.md)（录音评测方案，规划中）· [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，规划中）
+- 过程管理：[docs/PLAN.md](./docs/PLAN.md)（后续任务规划：做什么、什么顺序、产出什么）· [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)（验收标准：怎么算做完、怎么验、怎么记录）
 
 ---
 
@@ -57,7 +58,7 @@ src/ui/components/    设计系统组件（图标/卡片/按钮/徽标/分段控
 src/ui/effects/       触碰特效（接口 + 注册表 + 默认脉冲环）
 src/store/            曲库与偏好持久化
 assets/songs/         内置示例曲
-docs/                 PRD 与技术方案
+docs/                 PRD / 技术方案 / 系统架构 / 任务规划 / 验收标准
 scripts/verify-core.ts  核心逻辑自检脚本（无 UI，Node 直接跑）
 .github/workflows/    CI/CD：质量门禁 / EAS 出包 / Web 发布到 GitHub Pages
 eas.json              EAS 构建档位
