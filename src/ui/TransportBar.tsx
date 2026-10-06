@@ -7,21 +7,19 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { SPEED_OPTIONS } from '../player/usePlayback';
 import { formatDuration } from '../player/timing';
-import type { TimelineOrientation } from './NoteTimeline';
+import { SPEED_OPTIONS } from '../player/usePlayback';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface TransportBarProps {
   isPlaying: boolean;
   speed: number;
-  orientation: TimelineOrientation;
   positionMs: SharedValue<number>;
   totalMs: number;
   onPlayPause: () => void;
   onRestart: () => void;
   onSeek: (ms: number) => void;
   onSpeedChange: (speed: number) => void;
-  onOrientationChange: (orientation: TimelineOrientation) => void;
 }
 
 interface ControlButtonProps {
@@ -31,16 +29,26 @@ interface ControlButtonProps {
 }
 
 function ControlButton({ label, onPress, primary }: ControlButtonProps) {
+  const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        primary && styles.buttonPrimary,
+        { backgroundColor: colors.surfaceAlt },
+        primary && { backgroundColor: colors.accent },
         pressed && styles.buttonPressed,
       ]}
     >
-      <Text style={[styles.buttonText, primary && styles.buttonTextPrimary]}>{label}</Text>
+      <Text
+        style={[
+          styles.buttonText,
+          { color: colors.text },
+          primary && { color: colors.onAccent },
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -48,15 +56,14 @@ function ControlButton({ label, onPress, primary }: ControlButtonProps) {
 export function TransportBar({
   isPlaying,
   speed,
-  orientation,
   positionMs,
   totalMs,
   onPlayPause,
   onRestart,
   onSeek,
   onSpeedChange,
-  onOrientationChange,
 }: TransportBarProps) {
+  const { colors } = useTheme();
   const [barWidth, setBarWidth] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -82,10 +89,15 @@ export function TransportBar({
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: colors.surface, borderTopColor: colors.border },
+      ]}
+    >
       <View style={styles.progressRow}>
         <Pressable
-          style={styles.progressTrack}
+          style={[styles.progressTrack, { backgroundColor: colors.surfaceAlt }]}
           onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
           onPress={(event) => {
             if (barWidth <= 0 || totalMs <= 0) return;
@@ -93,19 +105,19 @@ export function TransportBar({
             onSeek(ratio * totalMs);
           }}
         >
-          <Animated.View style={[styles.progressFill, fillStyle]} />
+          <Animated.View
+            style={[styles.progressFill, { backgroundColor: colors.playhead }, fillStyle]}
+          />
         </Pressable>
-        <Text style={styles.time}>{`${formatDuration(elapsedMs)} / ${formatDuration(totalMs)}`}</Text>
+        <Text style={[styles.time, { color: colors.textMuted }]}>
+          {`${formatDuration(elapsedMs)} / ${formatDuration(totalMs)}`}
+        </Text>
       </View>
 
       <View style={styles.controls}>
         <ControlButton label="重播" onPress={onRestart} />
         <ControlButton label={isPlaying ? '暂停' : '播放'} onPress={onPlayPause} primary />
         <ControlButton label={`${speed}x`} onPress={cycleSpeed} />
-        <ControlButton
-          label={orientation === 'horizontal' ? '横向' : '纵向'}
-          onPress={() => onOrientationChange(orientation === 'horizontal' ? 'vertical' : 'horizontal')}
-        />
       </View>
     </View>
   );
@@ -116,9 +128,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E4E6EA',
   },
   progressRow: {
     flexDirection: 'row',
@@ -129,17 +139,14 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#E9EBEF',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: '#EB5757',
   },
   time: {
     fontSize: 12,
-    color: '#8A8F98',
     fontVariant: ['tabular-nums'],
   },
   controls: {
@@ -153,11 +160,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1F3F6',
-  },
-  buttonPrimary: {
-    backgroundColor: '#2F80ED',
-    flex: 1.4,
   },
   buttonPressed: {
     opacity: 0.7,
@@ -165,9 +167,5 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#3C4149',
-  },
-  buttonTextPrimary: {
-    color: '#FFFFFF',
   },
 });

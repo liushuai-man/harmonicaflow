@@ -1,27 +1,14 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { arrange } from '../core/arrange';
 import { getLayout } from '../core/layouts';
-import {
-  DEFAULT_PREFS,
-  importScore,
-  listLibrary,
-  loadPrefs,
-  loadScore,
-  type LibraryEntry,
-  type Prefs,
-} from '../store/library';
+import { importScore, listLibrary, loadScore, type LibraryEntry } from '../store/library';
+import { usePrefs } from '../store/prefs';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface EntryStats {
   total: number;
@@ -36,17 +23,17 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const { prefs } = usePrefs();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [statsMap, setStatsMap] = useState<Record<string, EntryStats>>({});
 
   const refresh = useCallback(async () => {
-    const [list, loadedPrefs] = await Promise.all([listLibrary(), loadPrefs()]);
+    const list = await listLibrary();
     setEntries(list);
-    setPrefs(loadedPrefs);
     setLoading(false);
   }, []);
 
@@ -111,16 +98,29 @@ export default function LibraryScreen() {
     const stats = statsMap[item.id];
     return (
       <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+        style={({ pressed }) => [
+          styles.card,
+          { backgroundColor: colors.surface },
+          pressed && styles.cardPressed,
+        ]}
         onPress={() => router.push({ pathname: '/practice/[id]', params: { id: item.id } })}
       >
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
+          <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
             {item.title}
           </Text>
-          {item.origin === 'builtin' ? <Text style={styles.badge}>示例</Text> : null}
+          {item.origin === 'builtin' ? (
+            <Text
+              style={[
+                styles.badge,
+                { color: colors.accent, backgroundColor: colors.accentSoft },
+              ]}
+            >
+              示例
+            </Text>
+          ) : null}
         </View>
-        <Text style={styles.cardMeta}>
+        <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
           {SOURCE_LABEL[item.source] ?? item.source} · {stats ? stats.total : item.noteCount} 个音块
           {stats && stats.infeasible > 0 ? ` · ${stats.infeasible} 个吹不出` : ''}
         </Text>
@@ -129,21 +129,24 @@ export default function LibraryScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen
         options={{
           title: '口琴跟吹助手',
           headerRight: () => (
             <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-              <Text style={styles.headerAction}>设置</Text>
+              <Text style={[styles.headerAction, { color: colors.accent }]}>设置</Text>
             </Pressable>
           ),
         }}
       />
 
       {message ? (
-        <Pressable style={styles.message} onPress={() => setMessage(null)}>
-          <Text style={styles.messageText}>{message}</Text>
+        <Pressable
+          style={[styles.message, { backgroundColor: colors.warningBg }]}
+          onPress={() => setMessage(null)}
+        >
+          <Text style={[styles.messageText, { color: colors.warningText }]}>{message}</Text>
         </Pressable>
       ) : null}
 
@@ -158,79 +161,87 @@ export default function LibraryScreen() {
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
-            <Text style={styles.sectionLabel}>
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
               曲库 · 当前口琴：{getLayout(prefs.layoutId, prefs.layoutOverrides).name}
             </Text>
           }
         />
       )}
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+      <View
+        style={[
+          styles.footer,
+          {
+            paddingBottom: insets.bottom + 12,
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
+          },
+        ]}
+      >
         <Pressable
-          style={({ pressed }) => [styles.importButton, pressed && styles.importButtonPressed]}
+          style={({ pressed }) => [
+            styles.importButton,
+            { backgroundColor: colors.accent },
+            pressed && styles.importButtonPressed,
+          ]}
           onPress={handleImport}
           disabled={importing}
         >
           {importing ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={colors.onAccent} />
           ) : (
-            <Text style={styles.importButtonText}>导入乐谱</Text>
+            <Text style={[styles.importButtonText, { color: colors.onAccent }]}>导入乐谱</Text>
           )}
         </Pressable>
-        <Text style={styles.footerHint}>支持 MusicXML / ABC / JSON，导入后自动分析并直接开始跟吹</Text>
+        <Text style={[styles.footerHint, { color: colors.textMuted }]}>
+          支持 MusicXML / ABC / JSON，导入后自动分析并直接开始跟吹
+        </Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F6F8' },
+  container: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerAction: { color: '#2F80ED', fontSize: 15, fontWeight: '600' },
+  headerAction: { fontSize: 15, fontWeight: '600' },
   message: {
     marginHorizontal: 16,
     marginTop: 12,
     padding: 10,
     borderRadius: 8,
-    backgroundColor: '#FFF4E5',
   },
-  messageText: { color: '#8A5B00', fontSize: 13 },
+  messageText: { fontSize: 13 },
   listContent: { padding: 16, paddingBottom: 24 },
-  sectionLabel: { fontSize: 13, color: '#8A8F98', marginBottom: 10 },
+  sectionLabel: { fontSize: 13, marginBottom: 10 },
   card: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
   },
   cardPressed: { opacity: 0.7 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardTitle: { flex: 1, fontSize: 16, fontWeight: '600', color: '#1F2329' },
+  cardTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
   badge: {
     fontSize: 11,
-    color: '#2F80ED',
-    backgroundColor: '#E8F1FE',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
     overflow: 'hidden',
   },
-  cardMeta: { marginTop: 6, fontSize: 13, color: '#8A8F98' },
+  cardMeta: { marginTop: 6, fontSize: 13 },
   footer: {
     paddingHorizontal: 16,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E4E6EA',
-    backgroundColor: '#FFFFFF',
   },
   importButton: {
     height: 50,
     borderRadius: 12,
-    backgroundColor: '#2F80ED',
     alignItems: 'center',
     justifyContent: 'center',
   },
   importButtonPressed: { opacity: 0.8 },
-  importButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  footerHint: { marginTop: 8, fontSize: 12, color: '#9AA0A6', textAlign: 'center' },
+  importButtonText: { fontSize: 16, fontWeight: '600' },
+  footerHint: { marginTop: 8, fontSize: 12, textAlign: 'center' },
 });

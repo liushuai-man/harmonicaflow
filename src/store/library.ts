@@ -23,10 +23,14 @@ import odeToJoySong from '../../assets/songs/ode-to-joy.json';
  * 不引入 AsyncStorage：
  *   - scores/{id}.{ext}    导入的原始乐谱文件
  *   - library.json         曲库索引
- *   - prefs.json           用户偏好（口琴预设 / 视图方向 / 倍速 / 音阶表校对）
+ *   - prefs.json           用户偏好（口琴预设 / 倍速 / 主题 / 主色 / 透视 / 音阶表校对）
  */
 
-export type ViewOrientation = 'horizontal' | 'vertical';
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type PerspectiveLevel = 'off' | 'weak' | 'strong';
+
+/** 默认主色（品牌蓝），也是旧版本 prefs 缺失 accent 时的回落值 */
+export const DEFAULT_ACCENT = '#2F80ED';
 
 export interface LibraryEntry {
   id: string;
@@ -42,16 +46,23 @@ export interface LibraryEntry {
 
 export interface Prefs {
   layoutId: string;
-  orientation: ViewOrientation;
   speed: number;
+  /** 主题模式：跟随系统 / 浅色 / 深色 */
+  themeMode: ThemeMode;
+  /** 主色（#RRGGBB），深浅两套色板由它派生 */
+  accent: string;
+  /** 纵向透视强度（近大远小） */
+  perspective: PerspectiveLevel;
   /** 用户校对后的音阶表覆盖：layoutId → holes */
   layoutOverrides: Record<string, Hole[]>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   layoutId: DEFAULT_LAYOUT_ID,
-  orientation: 'horizontal',
   speed: 1,
+  themeMode: 'system',
+  accent: DEFAULT_ACCENT,
+  perspective: 'weak',
   layoutOverrides: {},
 };
 
@@ -199,8 +210,19 @@ export async function loadPrefs(): Promise<Prefs> {
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       layoutId: parsed.layoutId ?? DEFAULT_PREFS.layoutId,
-      orientation: parsed.orientation === 'vertical' ? 'vertical' : 'horizontal',
-      speed: typeof parsed.speed === 'number' && parsed.speed > 0 ? parsed.speed : 1,
+      speed: typeof parsed.speed === 'number' && parsed.speed > 0 ? parsed.speed : DEFAULT_PREFS.speed,
+      themeMode:
+        parsed.themeMode === 'light' || parsed.themeMode === 'dark' || parsed.themeMode === 'system'
+          ? parsed.themeMode
+          : DEFAULT_PREFS.themeMode,
+      accent:
+        typeof parsed.accent === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.accent)
+          ? parsed.accent
+          : DEFAULT_PREFS.accent,
+      perspective:
+        parsed.perspective === 'off' || parsed.perspective === 'strong' || parsed.perspective === 'weak'
+          ? parsed.perspective
+          : DEFAULT_PREFS.perspective,
       layoutOverrides: parsed.layoutOverrides ?? {},
     };
   } catch {
