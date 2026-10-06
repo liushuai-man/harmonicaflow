@@ -67,6 +67,8 @@
 > 音名与 MIDI 互转自行实现（12 半音表），不引入 `@tonaljs/*`。
 > 全部依赖均可在 **Expo Go** 中运行，无需自定义原生构建。
 > v0.2.0 未新增运行时依赖：主题、透视、特效、简谱均为纯 JS/TS 实现。
+> 后续的 UI 设计系统（`theme/tokens.ts` + `ui/components/`，见 §7.8）同样零新增依赖：图标用已有的
+> `react-native-svg` 手绘，组件为项目内代码而非第三方库。
 
 ### 2.1 出包方式（EAS 云端构建）
 
@@ -265,17 +267,17 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 ### 7.3 时间轴渲染（`ui/NoteTimeline.tsx`，纵向单视图）
 
 - 用一个 `Animated.View` 包裹整块 `<Svg>` 承载整体平移（而非动画 SVG 内部的 `<G>`，以规避 SVG 内部 transform 动画的兼容风险）；**只有 1 个动画节点**，滚动在 UI 线程完成，不触发 React 重渲染。
-- **窗口化**：`useAnimatedReaction` 监听 `positionMs`，每 500ms 通过 `runOnJS` 回传一次锚点，JS 侧重算可视音块集合（约 ±1 屏），控制节点数 < 40。
-- 坐标（纵向，`PX_PER_SEC_V = 160`）：
+- **全曲绝对坐标**：音块 y 只由音符自身时刻决定，与可视窗口无关。滚动完全由 UI 线程的整块平移承担（`translateY = positionMs * pxPerMs`，anchor-free、永不重建），因此每 500ms 的重算不会改变渲染坐标，滚动连续无跳动。
+- **剔除**：`useAnimatedReaction` 监听 `positionMs`，每 500ms 通过 `runOnJS` 回传一次锚点；锚点**只用于剔除可视音块集合**（判定线上方 `ahead` 像素 + 判定线以下），渲染坐标不变，控制节点数 < 40。
+- 坐标（纵向，`PX_PER_SEC_V = 160`；画布高 `songH = (totalMs + LEAD_IN_MS) * pxPerMs + playhead`）：
 
   ```
-  h      = max(durationMs * pxPerMs, MIN_BLOCK_PX)
-  bottom = ahead - (startMs + LEAD_IN_MS - anchorMs) * pxPerMs
-  y      = bottom - h
-  x      = (hole - 1) * rowSize
+  h  = max(durationMs * pxPerMs, MIN_BLOCK_PX)
+  y  = songH - (startMs + LEAD_IN_MS) * pxPerMs - h   // 全曲绝对坐标，恒定
+  x  = (hole - 1) * rowSize
   ```
 
-  方块自上而下流入的组合位移由 `translateY = playhead - ahead + delta` 统一驱动。
+  画布 `top = playhead - songH`，配合 `translateY = positionMs * pxPerMs`，屏幕位置折算为 `playhead + (positionMs - startMs - LEAD_IN_MS) * pxPerMs`，与原窗口化公式等价。
 - 配色统一取主题色板（`theme/`）：吹 = 暖色、吸 = 冷色、推键为对应亮色，不可吹 = 弱化描边；不再在组件内硬编码色值。
 - 判定线：位于 `playhead = height - LABEL_AREA_H`（底部留出 42px 简谱标注区），颜色取 `theme.playhead`。
 - 判定线上方的可视区单独用一个带 `overflow: hidden` 的容器包裹，方块越过判定线后即被裁掉，形成"压线即命中"的观感。
@@ -289,8 +291,16 @@ transform: [{ perspective: P }, { rotateX: 'θ' }]
 transformOrigin: '50% 100%'
 ```
 
-- 以判定线为原点旋转（透视容器的高度即判定线上方的可视区，`transformOrigin: '50% 100%'` 锚在其底边），判定线保持不动、越往上越"后退"，形成近大远小。
-- 强度做成设置项 `perspective: 'off' | 'weak' | 'strong'`（默认 `weak`），映射到两组参数（`weak` = perspective 1200 / rotateX 14deg，`strong` = 700 / 26deg），便于真机微调。
+- 以判定线为原点旋转（透视容器的高度即判定线上方的可视区，`transformOrigin: '50% 100%'` 锚在其底边），判定线保持不动、越往上越"后退"，形成近大远小；各孔列同时向中心收拢，即"人眼看向远路"的消失点观感。
+- 强度做成设置项 `perspective: 'off' | 'weak' | 'strong'`（默认 `weak`），映射为**倾角 `rotateX` + 压缩强度 `k`**：`weak` = 38deg / k 1.8，`strong` = 52deg / k 1.45。
+- **关键几何约束**：绕底边旋转 θ、透视距离 P 时，平面的投影高度被裁剪在 `P / tanθ`；若 `P < playhead·tanθ`，可视区上半部无内容、会露出空白。因此 `P` 不写死，而是按可视高度反推：
+
+  ```
+  P         = round(k * playhead * tanθ)        // k > 1，越小前缩越剧烈
+  aheadRatio = k / (cosθ * (k - 1)) * 1.1       // 可视区实际压进的屏数 + 10% 余量
+  ```
+
+  `k` 越接近 1，远端越快收拢到消失点（越像远处路面），同时对机型高度自适应，不再依赖固定 P 值。
 - 已知代价：块内文字会随容器一起倾斜（属可接受的视觉风格）；如后续需要文字始终保持正视，可改为对每列单独做 2D 梯形缩放。
 - 该变换只作用于展示容器，不影响时序与命中计算（判定线仍按未变换坐标计算）。
 
@@ -311,11 +321,26 @@ transformOrigin: '50% 100%'
 ### 7.7 主题系统（`theme/`）
 
 - `theme/color.ts`：无依赖的 HSL 工具（hex/rgb/hsl 互转、明度调整、透明度、相对亮度、可读前景色），负责按主色 `accent` 派生深浅两套变体。
-- `theme/palette.ts`：色板键 `background / surface / surfaceAlt / text / textMuted / border / placeholder / accent / accentSoft / onAccent / blow / blowPush / draw / drawPush / infeasible / infeasibleBorder / infeasibleText / playhead / success / danger / warningBg / warningText`；由 `buildPalette(scheme, accent)` 生成，另导出 `ACCENT_PRESETS` 供设置页选集。
+- `theme/palette.ts`：色板键 `background / surface / surfaceAlt / text / textMuted / border / placeholder / accent / accentSoft / onAccent / blow / blowPush / draw / drawPush / infeasible / infeasibleBorder / infeasibleText / playhead / success / danger / warningBg / warningText / shadow / accentBorder / successSoft / dangerSoft`；由 `buildPalette(scheme, accent)` 生成，另导出 `ACCENT_PRESETS` 供设置页选集。
 - 吹/吸为**语义色**（暖/冷），与主色解耦，保证"吹吸一眼可辨"；深色下主色与吸音色会自动提亮，保证对比度。
 - `theme/ThemeProvider.tsx`：从 `usePrefs()` 读取 `themeMode` 与 `accent`，经 `useColorScheme()` 解析出最终 `scheme`，`useMemo` 生成色板并通过 Context 下发；对外暴露 `useTheme()` 返回 `{ scheme, colors }`。
 - 全部组件样式中的硬编码色值改为从 `useTheme()` 取值；静态 `StyleSheet` 只保留尺寸/布局。
 - 切换深浅或改主色即时生效（Context 驱动重渲染），无需重启。
+
+### 7.8 UI 设计系统（`theme/tokens.ts` + `ui/components/`）
+
+参照 shadcn/ui 的「开放代码 + 可组合 + 好看默认值」思路，把散落在页面里的内联样式收敛成一层自有组件，
+**不引入任何 UI 库或图标字体**——图标用已有的 `react-native-svg` 手绘，令牌只写尺寸与投影：
+
+- `theme/tokens.ts`：与配色无关的几何令牌——`spacing`（4pt 刻度）/ `radius` / `MIN_TOUCH`，以及
+  `elevation(level, shadowColor)`（iOS 走 `shadow*`、Android 走 `elevation`，两者互不相通必须成对给）。
+- `ui/components/`：`Icon`（24 网格 · 手绘描边图标集，颜色随主题）、`Card`（圆角 + 细描边 + 轻投影）、
+  `Button`（primary/secondary/ghost/danger × sm/md/lg，支持图标与加载态）、`Badge`（语义色药丸标签）、
+  `IconTile`（列表左侧图标底托）、`SegmentedControl`（滑块平移动画）、`Row`（列表 / 设置行）、
+  `HarmonicaMark`（主题化口琴插画）；统一从 `ui/components/index.ts` 导出。
+- 色板新增 `shadow` / `accentBorder` / `successSoft` / `dangerSoft` 四个语义键，供投影、强调描边与徽标使用。
+- 组件只吃「语义色板 + 几何令牌」，页面不写死色值与投影；深浅配色、主色切换对全部组件即时生效。
+- 可达性与反馈统一：可点区域不低于 `MIN_TOUCH`，可点元素带 `accessibilityRole/Label/State`，并有按下反馈。
 
 ---
 
@@ -368,8 +393,9 @@ src/core/                 model.ts · pitch.ts · arrange.ts
 src/core/layouts/         tremolo24C.ts · diatonic10C.ts · chromatic12C.ts · index.ts
 src/core/parsers/         json.ts · abc.ts · musicxml.ts · index.ts
 src/player/               timing.ts · usePlayback.ts
-src/theme/                color.ts · palette.ts · ThemeProvider.tsx
+src/theme/                color.ts · palette.ts · tokens.ts · ThemeProvider.tsx
 src/ui/                   NoteTimeline.tsx · TransportBar.tsx
+src/ui/components/        Icon.tsx · Card.tsx · Button.tsx · Badge.tsx · IconTile.tsx · SegmentedControl.tsx · Row.tsx · HarmonicaMark.tsx · index.ts
 src/ui/effects/           types.ts · registry.ts · pulse.tsx
 src/store/                library.ts · prefs.tsx
 assets/songs/             内置示例曲 JSON

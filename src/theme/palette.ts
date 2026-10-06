@@ -37,6 +37,14 @@ export interface Palette {
   danger: string;
   warningBg: string;
   warningText: string;
+
+  /** 投影色：供 tokens.elevation() 使用，深色下不能是死黑 */
+  shadow: string;
+  /** 主色描边：强调容器的轮廓（Hero / 选中态） */
+  accentBorder: string;
+  /** 成功 / 危险的浅色底，用于徽标与提示条 */
+  successSoft: string;
+  dangerSoft: string;
 }
 
 /** 语义色：吹 = 暖色，吸 = 冷色（与主色解耦，保证可辨） */
@@ -85,6 +93,11 @@ export function buildPalette(scheme: Scheme, accent: string): Palette {
       danger: '#EB5757',
       warningBg: '#3A2E14',
       warningText: '#F2C94C',
+
+      shadow: '#000000',
+      accentBorder: withAlpha(accentDark, 0.38),
+      successSoft: withAlpha('#27AE60', 0.2),
+      dangerSoft: withAlpha('#EB5757', 0.2),
     };
   }
 
@@ -115,5 +128,10 @@ export function buildPalette(scheme: Scheme, accent: string): Palette {
     danger: '#EB5757',
     warningBg: '#FFF4E5',
     warningText: '#8A5B00',
+
+    shadow: '#0F172A',
+    accentBorder: withAlpha(accent, 0.3),
+    successSoft: withAlpha('#27AE60', 0.14),
+    dangerSoft: withAlpha('#EB5757', 0.12),
   };
 }

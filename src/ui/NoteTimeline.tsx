@@ -8,7 +8,7 @@ import Animated, {
   useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import type { Hole, TabAction, TabNote } from '../core/model';
 import { midiToJianpuText } from '../core/pitch';
@@ -25,7 +25,8 @@ import type { EffectContext } from './effects/types';
  * 要点：
  *   - **只有 1 个动画节点**：一个包裹 Svg 的 Animated.View 做整体平移，
  *     由 UI 线程上的共享值 positionMs 驱动，不触发 React 重渲染。
- *   - **窗口化**：每 500ms 在 JS 侧重算一次可视音块集合，只渲染该集合（< 40 个）。
+ *   - **全曲绝对坐标**：音块 y 只与音符时刻有关，锚点仅用于剔除可视集合
+ *     （每 500ms 在 JS 侧重算一次，渲染坐标不变），因此滚动不会跳动。
  *   - **透视**：包裹容器以判定线为原点做 rotateX，形成近大远小（§7.4）。
  *   - **简谱**：判定线下方按孔列标注该孔吹/吸的简谱度数（§7.6）。
  *   - **触碰特效**：positionMs 越过音符接触时刻时触发一次特效（§7.5）。
@@ -44,15 +45,26 @@ const LABEL_AREA_H = 42;
 /** 一次前进跨越的音符数超过该值视为拖动进度，不补发特效 */
 const MAX_BURST = 8;
 
-/** 透视强度 → 参数；`perspective` 越小、角度越大，透视越强 */
-const PERSPECTIVE_PARAMS: Record<
-  PerspectiveLevel,
-  { perspective: number; rotateX: `${number}deg` } | null
-> = {
+/**
+ * 透视强度 → 倾斜角度与压缩强度（见 docs/TECH_DESIGN.md §7.4）
+ *
+ * 以判定线为底边做 rotateX，形成「人眼看向远路」的近大远小：`rotateX` 越大越像
+ * 俯视向前的路面，`k` 越小前缩越剧烈（远端更快收拢到一点）。
+ *
+ * 几何约束：绕底边旋转 θ、透视距离 P 时，平面的投影高度被裁剪在 `P / tanθ`；
+ * 若 `P < playhead·tanθ`，可视区上半部就没有内容（露出空白）。因此 P 不写死，
+ * 而是按可视高度反推 `P = k · playhead · tanθ`（要求 `k > 1`），各机型都能填满。
+ */
+const PERSPECTIVE_PARAMS: Record<PerspectiveLevel, { rotateX: number; k: number } | null> = {
   off: null,
-  weak: { perspective: 1200, rotateX: '14deg' },
-  strong: { perspective: 700, rotateX: '26deg' },
+  weak: { rotateX: 38, k: 1.8 },
+  strong: { rotateX: 52, k: 1.45 },
 };
+
+/** 无透视时判定线上方预排的屏数 */
+const AHEAD_RATIO_FLAT = 1.2;
+/** 剔除余量：锚点最多滞后一个重算步长，远端多留一屏步长避免边缘闪入 */
+const CULL_MARGIN_PX = WINDOW_STEP_MS * (PX_PER_SEC_V / 1000);
 
 interface Block {
   note: TabNote;
@@ -129,38 +141,54 @@ export function NoteTimeline({
 
   const pxPerMs = PX_PER_SEC_V / 1000;
 
+  const tiltParams = PERSPECTIVE_PARAMS[perspective];
+
   const geometry = useMemo(() => {
     const { width, height } = size;
     if (width === 0 || height === 0) return null;
     const playhead = Math.max(height - LABEL_AREA_H, 1);
-    const ahead = playhead * 1.2;
-    return {
-      width,
-      height,
-      playhead,
-      ahead,
-      canvasW: width,
-      canvasH: ahead + playhead,
-      rowSize: width / holeCount,
-    };
-  }, [size, holeCount]);
+
+    let aheadRatio = AHEAD_RATIO_FLAT;
+    let tilt: { perspective: number; rotateX: `${number}deg` } | null = null;
+
+    if (tiltParams) {
+      const rad = (tiltParams.rotateX * Math.PI) / 180;
+      const tan = Math.tan(rad);
+      const cos = Math.cos(rad);
+      // 投影高度上限为 P / tanθ，故取 P = k·playhead·tanθ 才能填满可视区
+      const perspective = Math.round(tiltParams.k * playhead * tan);
+      // 可视区实际压进的屏数：uMax / playhead = k / (cosθ·(k-1))，再留 10% 余量
+      aheadRatio = (tiltParams.k / (cos * (tiltParams.k - 1))) * 1.1;
+      tilt = { perspective, rotateX: `${tiltParams.rotateX}deg` };
+    }
+
+    /** 判定线上方需要预排的像素（越大越能把远端填满） */
+    const ahead = playhead * aheadRatio;
+    /**
+     * 画布用「全曲绝对坐标」：音块 y 只由音符自身时刻决定，滚动完全交给
+     * UI 线程的整块平移。这样每 500ms 重算可视窗口时坐标不变，
+     * 不会出现「窗口锚点跳变 + 位移补偿不同帧」造成的跳动。
+     */
+    const songH = (timeline.totalMs + LEAD_IN_MS) * pxPerMs + playhead;
+    return { width, height, playhead, ahead, songH, rowSize: width / holeCount, tilt };
+  }, [size, holeCount, tiltParams, timeline.totalMs, pxPerMs]);
 
   const blocks = useMemo<Block[]>(() => {
     if (!geometry) return [];
-    const { rowSize } = geometry;
+    const { rowSize, songH, playhead, ahead } = geometry;
     const result: Block[] = [];
     for (const note of notes) {
       const startMs = note.startTicks * timeline.msPerTick;
       const durationMs = note.durationTicks * timeline.msPerTick;
-      const lead = (startMs + LEAD_IN_MS - anchorMs) * pxPerMs;
-      const bottom = geometry.ahead - lead;
       const h = Math.max(durationMs * pxPerMs, MIN_BLOCK_PX);
-      const y = bottom - h;
-      if (bottom <= 0 || y >= geometry.canvasH) continue;
+      // 判定线处的屏幕位置（仅用于剔除，不参与渲染坐标）
+      const screenBottom = playhead - (startMs + LEAD_IN_MS - anchorMs) * pxPerMs;
+      if (screenBottom < -(ahead + CULL_MARGIN_PX) || screenBottom - h > playhead) continue;
       result.push({
         note,
         x: (note.hole - 1) * rowSize + BLOCK_GAP / 2,
-        y,
+        // 全曲绝对坐标：只与音符时刻有关，永不随窗口变化
+        y: songH - (startMs + LEAD_IN_MS) * pxPerMs - h,
         w: Math.max(rowSize - BLOCK_GAP, 1),
         h,
       });
@@ -168,11 +196,10 @@ export function NoteTimeline({
     return result;
   }, [notes, timeline.msPerTick, anchorMs, pxPerMs, geometry]);
 
+  // anchor-free：位移只由播放位置决定，窗口锚点不再参与，永不重建也永不跳变
   const animatedStyle = useAnimatedStyle(() => {
-    const delta = (positionMs.value - anchorMs) * pxPerMs;
-    const base = (geometry?.playhead ?? 0) - (geometry?.ahead ?? 0);
-    return { transform: [{ translateY: base + delta }] };
-  }, [anchorMs, pxPerMs, geometry?.playhead, geometry?.ahead]);
+    return { transform: [{ translateY: positionMs.value * pxPerMs }] };
+  }, [pxPerMs]);
 
   // ── 触碰特效触发 ──────────────────────────────────────
 
@@ -247,7 +274,6 @@ export function NoteTimeline({
     setEffects([]);
   }, [hitTimes, hitCursor, lastPos]);
 
-  const perspectiveStyle = PERSPECTIVE_PARAMS[perspective];
   const showScaleLabels = geometry !== null && geometry.rowSize >= 12;
 
   return (
@@ -258,11 +284,11 @@ export function NoteTimeline({
             <View
               style={[
                 styles.perspective,
-                perspectiveStyle
+                geometry.tilt
                   ? {
                       transform: [
-                        { perspective: perspectiveStyle.perspective },
-                        { rotateX: perspectiveStyle.rotateX },
+                        { perspective: geometry.tilt.perspective },
+                        { rotateX: geometry.tilt.rotateX },
                       ],
                       transformOrigin: '50% 100%',
                     }
@@ -272,11 +298,43 @@ export function NoteTimeline({
               <Animated.View
                 style={[
                   styles.canvas,
-                  { width: geometry.canvasW, height: geometry.canvasH },
+                  {
+                    top: geometry.playhead - geometry.songH,
+                    width: geometry.width,
+                    height: geometry.songH,
+                  },
                   animatedStyle,
                 ]}
               >
-                <Svg width={geometry.canvasW} height={geometry.canvasH}>
+                <Svg width={geometry.width} height={geometry.songH}>
+                  {/* 列轨道：偶数列淡底 + 列间分隔线，便于对准孔位 */}
+                  {holes.map((hole, index) =>
+                    index % 2 === 0 ? (
+                      <Rect
+                        key={`lane-${hole.index}`}
+                        x={index * geometry.rowSize}
+                        y={0}
+                        width={geometry.rowSize}
+                        height={geometry.songH}
+                        fill={colors.surfaceAlt}
+                      />
+                    ) : null,
+                  )}
+                  {holes.map((hole, index) =>
+                    index > 0 ? (
+                      <Line
+                        key={`sep-${hole.index}`}
+                        x1={index * geometry.rowSize}
+                        y1={0}
+                        x2={index * geometry.rowSize}
+                        y2={geometry.songH}
+                        stroke={colors.border}
+                        strokeWidth={StyleSheet.hairlineWidth}
+                      />
+                    ) : null,
+                  )}
+
+                  {/* 音块：底色 + 顶部高光，做出一点立体感 */}
                   {blocks.map((block) => {
                     const { note } = block;
                     const fill = note.feasible ? blockColor(colors, note.action) : colors.infeasible;
@@ -287,7 +345,7 @@ export function NoteTimeline({
                         y={block.y}
                         width={block.w}
                         height={block.h}
-                        rx={3}
+                        rx={4}
                         fill={fill}
                         stroke={note.feasible ? 'transparent' : colors.infeasibleBorder}
                         strokeWidth={note.feasible ? 0 : 1.5}
@@ -295,6 +353,21 @@ export function NoteTimeline({
                       />
                     );
                   })}
+                  {blocks.map((block) =>
+                    block.note.feasible && block.h >= 12 && block.w >= 12 ? (
+                      <Rect
+                        key={`${block.note.id}-gloss`}
+                        x={block.x + 2}
+                        y={block.y + 2}
+                        width={Math.max(block.w - 4, 1)}
+                        height={Math.min(block.h * 0.32, 7)}
+                        rx={2}
+                        fill="#FFFFFF"
+                        fillOpacity={0.22}
+                      />
+                    ) : null,
+                  )}
+
                   {blocks.map((block) => {
                     const { note } = block;
                     const labelFits = block.w >= 18 && block.h >= 14;
@@ -317,6 +390,14 @@ export function NoteTimeline({
             </View>
           </View>
 
+          {/* 判定线：外发光带 + 明亮实线 */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.playheadGlow,
+              { top: geometry.playhead - PLAYHEAD_GLOW_H / 2, backgroundColor: colors.playhead },
+            ]}
+          />
           <View
             pointerEvents="none"
             style={[
@@ -347,8 +428,18 @@ export function NoteTimeline({
                 { height: LABEL_AREA_H, borderTopColor: colors.border },
               ]}
             >
-              {holes.map((hole) => (
-                <View key={hole.index} style={styles.labelCell}>
+              {holes.map((hole, index) => (
+                <View
+                  key={hole.index}
+                  style={[
+                    styles.labelCell,
+                    index % 2 === 0 && { backgroundColor: colors.surfaceAlt },
+                    index > 0 && {
+                      borderLeftWidth: StyleSheet.hairlineWidth,
+                      borderLeftColor: colors.border,
+                    },
+                  ]}
+                >
                   <Text style={[styles.labelText, { color: colors.blow }]} numberOfLines={1}>
                     {midiToJianpuText(hole.blow, tonicPc)}
                   </Text>
@@ -368,6 +459,8 @@ export function NoteTimeline({
   );
 }
 
+const PLAYHEAD_GLOW_H = 22;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -386,7 +479,13 @@ const styles = StyleSheet.create({
   canvas: {
     position: 'absolute',
     left: 0,
-    top: 0,
+  },
+  playheadGlow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: PLAYHEAD_GLOW_H,
+    opacity: 0.16,
   },
   playhead: {
     position: 'absolute',
@@ -413,6 +512,7 @@ const styles = StyleSheet.create({
   },
   labelCell: {
     flex: 1,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
   },

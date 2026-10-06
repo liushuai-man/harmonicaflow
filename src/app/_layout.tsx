@@ -26,6 +26,7 @@ function ThemedStack() {
       <Stack
         screenOptions={{
           headerTitleAlign: 'center',
+          headerTitleStyle: { fontSize: 17, fontWeight: '700' },
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
           headerShadowVisible: false,

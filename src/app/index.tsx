@@ -9,6 +9,8 @@ import { getLayout } from '../core/layouts';
 import { importScore, listLibrary, loadScore, type LibraryEntry } from '../store/library';
 import { usePrefs } from '../store/prefs';
 import { useTheme } from '../theme/ThemeProvider';
+import { elevation, radius, spacing } from '../theme/tokens';
+import { Badge, Button, Card, HarmonicaMark, Icon, IconTile } from '../ui/components';
 
 interface EntryStats {
   total: number;
@@ -31,6 +33,8 @@ export default function LibraryScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [statsMap, setStatsMap] = useState<Record<string, EntryStats>>({});
 
+  const layout = getLayout(prefs.layoutId, prefs.layoutOverrides);
+
   const refresh = useCallback(async () => {
     const list = await listLibrary();
     setEntries(list);
@@ -46,7 +50,7 @@ export default function LibraryScreen() {
   // 后台逐首计算“不可吹音数”，分帧执行避免阻塞列表
   useEffect(() => {
     let cancelled = false;
-    const layout = getLayout(prefs.layoutId, prefs.layoutOverrides);
+    const activeLayout = getLayout(prefs.layoutId, prefs.layoutOverrides);
 
     (async () => {
       for (const entry of entries) {
@@ -54,7 +58,7 @@ export default function LibraryScreen() {
         try {
           const score = await loadScore(entry);
           if (cancelled) return;
-          const { stats } = arrange(score, layout);
+          const { stats } = arrange(score, activeLayout);
           setStatsMap((prev) => ({
             ...prev,
             [entry.id]: { total: stats.total, infeasible: stats.total - stats.feasibleCount },
@@ -94,37 +98,47 @@ export default function LibraryScreen() {
     }
   }, [importing, refresh]);
 
+  const openEntry = useCallback((id: string) => {
+    router.push({ pathname: '/practice/[id]', params: { id } });
+  }, []);
+
   const renderItem = ({ item }: { item: LibraryEntry }) => {
     const stats = statsMap[item.id];
+    const builtin = item.origin === 'builtin';
+    const playable = stats ? stats.total - stats.infeasible : null;
+
     return (
-      <Pressable
-        style={({ pressed }) => [
-          styles.card,
-          { backgroundColor: colors.surface },
-          pressed && styles.cardPressed,
-        ]}
-        onPress={() => router.push({ pathname: '/practice/[id]', params: { id: item.id } })}
-      >
-        <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
-            {item.title}
-          </Text>
-          {item.origin === 'builtin' ? (
-            <Text
-              style={[
-                styles.badge,
-                { color: colors.accent, backgroundColor: colors.accentSoft },
-              ]}
-            >
-              示例
+      <Card onPress={() => openEntry(item.id)} style={styles.card} accessibilityLabel={item.title}>
+        <View style={styles.cardRow}>
+          <IconTile name={builtin ? 'sparkles' : 'music'} tone={builtin ? 'accent' : 'neutral'} />
+          <View style={styles.cardBody}>
+            <View style={styles.cardTitleRow}>
+              <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+                {item.title}
+              </Text>
+              {builtin ? <Badge label="示例" tone="accent" /> : null}
+            </View>
+
+            <Text style={[styles.cardMeta, { color: colors.textMuted }]} numberOfLines={1}>
+              {SOURCE_LABEL[item.source] ?? item.source} · {stats ? stats.total : item.noteCount} 个音块
             </Text>
-          ) : null}
+
+            {stats && playable !== null ? (
+              <View style={styles.cardChips}>
+                <Badge
+                  icon="target"
+                  tone={stats.infeasible > 0 ? 'warning' : 'success'}
+                  label={`可吹 ${playable}/${stats.total}`}
+                />
+                {stats.infeasible > 0 ? (
+                  <Badge tone="danger" label={`${stats.infeasible} 个吹不出`} />
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+          <Icon name="chevronRight" size={18} color={colors.placeholder} />
         </View>
-        <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
-          {SOURCE_LABEL[item.source] ?? item.source} · {stats ? stats.total : item.noteCount} 个音块
-          {stats && stats.infeasible > 0 ? ` · ${stats.infeasible} 个吹不出` : ''}
-        </Text>
-      </Pressable>
+      </Card>
     );
   };
 
@@ -134,21 +148,18 @@ export default function LibraryScreen() {
         options={{
           title: '口琴跟吹助手',
           headerRight: () => (
-            <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-              <Text style={[styles.headerAction, { color: colors.accent }]}>设置</Text>
+            <Pressable
+              onPress={() => router.push('/settings')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="设置"
+              style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
+            >
+              <Icon name="settings" size={21} color={colors.accent} />
             </Pressable>
           ),
         }}
       />
-
-      {message ? (
-        <Pressable
-          style={[styles.message, { backgroundColor: colors.warningBg }]}
-          onPress={() => setMessage(null)}
-        >
-          <Text style={[styles.messageText, { color: colors.warningText }]}>{message}</Text>
-        </Pressable>
-      ) : null}
 
       {loading ? (
         <View style={styles.center}>
@@ -161,9 +172,46 @@ export default function LibraryScreen() {
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
-            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-              曲库 · 当前口琴：{getLayout(prefs.layoutId, prefs.layoutOverrides).name}
-            </Text>
+            <View style={styles.header}>
+              {message ? (
+                <Pressable
+                  onPress={() => setMessage(null)}
+                  style={[
+                    styles.message,
+                    { backgroundColor: colors.warningBg, borderColor: colors.warningText },
+                  ]}
+                >
+                  <Icon name="info" size={16} color={colors.warningText} />
+                  <Text style={[styles.messageText, { color: colors.warningText }]}>{message}</Text>
+                </Pressable>
+              ) : null}
+
+              <Card
+                elevated={false}
+                highlighted
+                style={[styles.hero, { backgroundColor: colors.accentSoft }]}
+              >
+                <View style={styles.heroRow}>
+                  <View style={styles.heroText}>
+                    <Text style={[styles.heroTitle, { color: colors.text }]}>
+                      跟着音块吹口琴
+                    </Text>
+                    <Text style={[styles.heroSubtitle, { color: colors.textMuted }]}>
+                      导入乐谱 → 自动编配孔位 → 音块压线即该吹
+                    </Text>
+                  </View>
+                  <HarmonicaMark size={112} />
+                </View>
+
+                <View style={styles.heroChips}>
+                  <Badge icon="harp" tone="accent" label={layout.name} />
+                  <Badge icon="target" tone="neutral" label={`${layout.holes.length} 孔`} />
+                  <Badge icon="music" tone="neutral" label={`${entries.length} 首曲目`} />
+                </View>
+              </Card>
+
+              <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>曲库</Text>
+            </View>
           }
         />
       )}
@@ -172,27 +220,21 @@ export default function LibraryScreen() {
         style={[
           styles.footer,
           {
-            paddingBottom: insets.bottom + 12,
+            paddingBottom: insets.bottom + spacing.md,
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
           },
+          elevation(2, colors.shadow),
         ]}
       >
-        <Pressable
-          style={({ pressed }) => [
-            styles.importButton,
-            { backgroundColor: colors.accent },
-            pressed && styles.importButtonPressed,
-          ]}
+        <Button
+          label="导入乐谱"
+          icon="upload"
+          size="lg"
+          fullWidth
+          loading={importing}
           onPress={handleImport}
-          disabled={importing}
-        >
-          {importing ? (
-            <ActivityIndicator color={colors.onAccent} />
-          ) : (
-            <Text style={[styles.importButtonText, { color: colors.onAccent }]}>导入乐谱</Text>
-          )}
-        </Pressable>
+        />
         <Text style={[styles.footerHint, { color: colors.textMuted }]}>
           支持 MusicXML / ABC / JSON，导入后自动分析并直接开始跟吹
         </Text>
@@ -204,44 +246,46 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerAction: { fontSize: 15, fontWeight: '600' },
+  headerButton: { padding: spacing.xs },
+  pressed: { opacity: 0.6 },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  header: { gap: spacing.md },
   message: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  messageText: { fontSize: 13 },
-  listContent: { padding: 16, paddingBottom: 24 },
-  sectionLabel: { fontSize: 13, marginBottom: 10 },
-  card: {
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+  messageText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  hero: {
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
-  cardPressed: { opacity: 0.7 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
-  badge: {
-    fontSize: 11,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  heroText: { flex: 1, gap: spacing.xs + 2 },
+  heroTitle: { fontSize: 19, fontWeight: '700', letterSpacing: 0.2 },
+  heroSubtitle: { fontSize: 12.5, lineHeight: 18 },
+  heroChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  sectionLabel: {
+    marginTop: spacing.xs,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
-  cardMeta: { marginTop: 6, fontSize: 13 },
+  card: { marginBottom: spacing.md },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  cardBody: { flex: 1, gap: 4 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cardTitle: { flexShrink: 1, fontSize: 16, fontWeight: '600' },
+  cardMeta: { fontSize: 12.5 },
+  cardChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs + 2, marginTop: 2 },
   footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  importButton: {
-    height: 50,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  importButtonPressed: { opacity: 0.8 },
-  importButtonText: { fontSize: 16, fontWeight: '600' },
-  footerHint: { marginTop: 8, fontSize: 12, textAlign: 'center' },
+  footerHint: { marginTop: spacing.sm, fontSize: 12, textAlign: 'center' },
 });

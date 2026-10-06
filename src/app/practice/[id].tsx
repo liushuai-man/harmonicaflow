@@ -1,6 +1,6 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { arrange } from '../../core/arrange';
@@ -9,11 +9,13 @@ import type { ArrangeResult, Score } from '../../core/model';
 import { keySignatureToTonicPc } from '../../core/pitch';
 import { buildTimeline, type TimelineInfo } from '../../player/timing';
 import { usePlayback } from '../../player/usePlayback';
+import { listLibrary, loadScore, type LibraryEntry } from '../../store/library';
 import { usePrefs } from '../../store/prefs';
 import { useTheme } from '../../theme/ThemeProvider';
+import { radius, spacing } from '../../theme/tokens';
+import { Button, Icon, IconTile } from '../../ui/components';
 import { NoteTimeline } from '../../ui/NoteTimeline';
 import { TransportBar } from '../../ui/TransportBar';
-import { listLibrary, loadScore, type LibraryEntry } from '../../store/library';
 
 /**
  * 跟吹页（见 docs/TECH_DESIGN.md §7）
@@ -106,6 +108,7 @@ export default function PracticeScreen() {
           { backgroundColor: colors.surface, borderBottomColor: colors.border },
         ]}
       >
+        <IconTile name="harp" size={38} tone="accent" />
         <View style={styles.topBarText}>
           <Text style={[styles.layoutName, { color: colors.text }]} numberOfLines={1}>
             {layout.name}
@@ -116,15 +119,21 @@ export default function PracticeScreen() {
             {layout.holes.length} 孔
           </Text>
         </View>
-        <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-          <Text style={[styles.changeAction, { color: colors.accent }]}>更换口琴</Text>
-        </Pressable>
+        <Button
+          label="更换"
+          icon="settings"
+          variant="ghost"
+          size="sm"
+          onPress={() => router.push('/settings')}
+        />
       </View>
 
       {stats && stats.infeasibleNotes.length > 0 ? (
-        <View style={[styles.warning, { backgroundColor: colors.warningBg }]}>
-          <Text style={[styles.warningText, { color: colors.warningText }]}>
-            有 {stats.total - stats.feasibleCount} 个音超出现有音域：{stats.infeasibleNotes.join('、')}
+        <View style={[styles.banner, { backgroundColor: colors.warningBg }]}>
+          <Icon name="alert" size={16} color={colors.warningText} />
+          <Text style={[styles.bannerText, { color: colors.warningText }]}>
+            有 {stats.total - stats.feasibleCount} 个音超出现有音域：
+            {stats.infeasibleNotes.join('、')}
             （已用最近孔位占位，可更换口琴或校音阶表）
           </Text>
         </View>
@@ -132,6 +141,7 @@ export default function PracticeScreen() {
 
       {error ? (
         <View style={styles.center}>
+          <Icon name="alert" size={32} color={colors.danger} />
           <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
         </View>
       ) : result && timeline && score ? (
@@ -168,24 +178,27 @@ export default function PracticeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  errorText: { fontSize: 14, textAlign: 'center' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: spacing.md },
+  errorText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  topBarText: { flex: 1, marginRight: 12 },
-  layoutName: { fontSize: 15, fontWeight: '600' },
-  layoutMeta: { marginTop: 2, fontSize: 12 },
-  changeAction: { fontSize: 14, fontWeight: '600' },
-  warning: {
-    marginHorizontal: 16,
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 8,
+  topBarText: { flex: 1, gap: 2 },
+  layoutName: { fontSize: 15, fontWeight: '700' },
+  layoutMeta: { fontSize: 12 },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
   },
-  warningText: { fontSize: 12, lineHeight: 18 },
+  bannerText: { flex: 1, fontSize: 12, lineHeight: 18 },
 });

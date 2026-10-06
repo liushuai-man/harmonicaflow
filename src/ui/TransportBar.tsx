@@ -10,6 +10,8 @@ import Animated, {
 import { formatDuration } from '../player/timing';
 import { SPEED_OPTIONS } from '../player/usePlayback';
 import { useTheme } from '../theme/ThemeProvider';
+import { elevation, radius, spacing } from '../theme/tokens';
+import { Button } from './components';
 
 interface TransportBarProps {
   isPlaying: boolean;
@@ -20,37 +22,6 @@ interface TransportBarProps {
   onRestart: () => void;
   onSeek: (ms: number) => void;
   onSpeedChange: (speed: number) => void;
-}
-
-interface ControlButtonProps {
-  label: string;
-  onPress: () => void;
-  primary?: boolean;
-}
-
-function ControlButton({ label, onPress, primary }: ControlButtonProps) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
-        { backgroundColor: colors.surfaceAlt },
-        primary && { backgroundColor: colors.accent },
-        pressed && styles.buttonPressed,
-      ]}
-    >
-      <Text
-        style={[
-          styles.buttonText,
-          { color: colors.text },
-          primary && { color: colors.onAccent },
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
 }
 
 export function TransportBar({
@@ -78,9 +49,12 @@ export function TransportBar({
     [],
   );
 
-  const fillStyle = useAnimatedStyle(() => ({
-    width: totalMs > 0 ? Math.max(0, Math.min(1, positionMs.value / totalMs)) * barWidth : 0,
-  }), [barWidth, totalMs]);
+  const fillStyle = useAnimatedStyle(
+    () => ({
+      width: totalMs > 0 ? Math.max(0, Math.min(1, positionMs.value / totalMs)) * barWidth : 0,
+    }),
+    [barWidth, totalMs],
+  );
 
   const cycleSpeed = () => {
     const index = SPEED_OPTIONS.indexOf(speed as (typeof SPEED_OPTIONS)[number]);
@@ -93,12 +67,15 @@ export function TransportBar({
       style={[
         styles.container,
         { backgroundColor: colors.surface, borderTopColor: colors.border },
+        elevation(2, colors.shadow),
       ]}
     >
       <View style={styles.progressRow}>
         <Pressable
-          style={[styles.progressTrack, { backgroundColor: colors.surfaceAlt }]}
+          style={[styles.track, { backgroundColor: colors.surfaceAlt }]}
           onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
+          accessibilityRole="adjustable"
+          accessibilityLabel="播放进度"
           onPress={(event) => {
             if (barWidth <= 0 || totalMs <= 0) return;
             const ratio = Math.max(0, Math.min(1, event.nativeEvent.locationX / barWidth));
@@ -106,8 +83,15 @@ export function TransportBar({
           }}
         >
           <Animated.View
-            style={[styles.progressFill, { backgroundColor: colors.playhead }, fillStyle]}
-          />
+            style={[styles.fill, { backgroundColor: colors.playhead }, fillStyle]}
+          >
+            <View
+              style={[
+                styles.thumb,
+                { backgroundColor: colors.surface, borderColor: colors.playhead },
+              ]}
+            />
+          </Animated.View>
         </Pressable>
         <Text style={[styles.time, { color: colors.textMuted }]}>
           {`${formatDuration(elapsedMs)} / ${formatDuration(totalMs)}`}
@@ -115,35 +99,66 @@ export function TransportBar({
       </View>
 
       <View style={styles.controls}>
-        <ControlButton label="重播" onPress={onRestart} />
-        <ControlButton label={isPlaying ? '暂停' : '播放'} onPress={onPlayPause} primary />
-        <ControlButton label={`${speed}x`} onPress={cycleSpeed} />
+        <Button
+          label="重播"
+          icon="restart"
+          variant="secondary"
+          onPress={onRestart}
+          style={styles.side}
+        />
+        <Button
+          label={isPlaying ? '暂停' : '播放'}
+          icon={isPlaying ? 'pause' : 'play'}
+          variant="primary"
+          onPress={onPlayPause}
+          style={styles.main}
+        />
+        <Button
+          label={`${speed}x`}
+          icon="gauge"
+          variant="secondary"
+          onPress={cycleSpeed}
+          style={styles.side}
+        />
       </View>
     </View>
   );
 }
 
+const TRACK_HEIGHT = 8;
+const THUMB_SIZE = 16;
+
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   progressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.md,
   },
-  progressTrack: {
+  track: {
     flex: 1,
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
+    height: TRACK_HEIGHT,
+    borderRadius: radius.pill,
+    justifyContent: 'center',
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
+  fill: {
+    height: TRACK_HEIGHT,
+    borderRadius: radius.pill,
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  thumb: {
+    position: 'absolute',
+    right: -(THUMB_SIZE / 2),
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: THUMB_SIZE / 2,
+    borderWidth: 2,
   },
   time: {
     fontSize: 12,
@@ -151,21 +166,9 @@ const styles = StyleSheet.create({
   },
   controls: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
-  button: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonPressed: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
+  side: { flex: 1 },
+  main: { flex: 1.35 },
 });

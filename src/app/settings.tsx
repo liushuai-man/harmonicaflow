@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,9 +15,20 @@ import type { Hole } from '../core/model';
 import { midiToNoteName, tryNoteNameToMidi } from '../core/pitch';
 import type { PerspectiveLevel, ThemeMode } from '../store/library';
 import { usePrefs } from '../store/prefs';
-import { useTheme } from '../theme/ThemeProvider';
-import { ACCENT_PRESETS } from '../theme/palette';
 import { readableOn } from '../theme/color';
+import { ACCENT_PRESETS } from '../theme/palette';
+import { useTheme } from '../theme/ThemeProvider';
+import { radius, spacing } from '../theme/tokens';
+import {
+  Badge,
+  Button,
+  Card,
+  Icon,
+  IconTile,
+  Row,
+  SegmentedControl,
+  type IconName,
+} from '../ui/components';
 
 /**
  * 统一设置页（见 docs/TECH_DESIGN.md §8）
@@ -30,10 +41,10 @@ import { readableOn } from '../theme/color';
  * 所有可配置项集中在此页；写入统一走 updatePrefs，避免与主题层互相覆盖。
  */
 
-const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
-  { label: '跟随系统', value: 'system' },
-  { label: '浅色', value: 'light' },
-  { label: '深色', value: 'dark' },
+const THEME_OPTIONS: { label: string; value: ThemeMode; icon: IconName }[] = [
+  { label: '跟随系统', value: 'system', icon: 'auto' },
+  { label: '浅色', value: 'light', icon: 'sun' },
+  { label: '深色', value: 'dark', icon: 'moon' },
 ];
 
 const PERSPECTIVE_OPTIONS: { label: string; value: PerspectiveLevel }[] = [
@@ -78,56 +89,27 @@ function parseCell(value: string): { midi: number | null; valid: boolean } {
 }
 
 interface SectionProps {
+  icon: IconName;
   title: string;
   hint?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
-function Section({ title, hint, children }: SectionProps) {
+/** 分组：图标 + 标题 + 说明，内容装在统一表面的卡片里 */
+function Section({ icon, title, hint, children }: SectionProps) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.section, { backgroundColor: colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
-      {hint ? <Text style={[styles.sectionHint, { color: colors.textMuted }]}>{hint}</Text> : null}
-      {children}
-    </View>
-  );
-}
-
-interface SegmentedProps<T extends string> {
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (value: T) => void;
-}
-
-function Segmented<T extends string>({ options, value, onChange }: SegmentedProps<T>) {
-  const { colors } = useTheme();
-  return (
-    <View style={[styles.segmented, { backgroundColor: colors.surfaceAlt }]}>
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <Pressable
-            key={option.value}
-            onPress={() => onChange(option.value)}
-            style={[
-              styles.segment,
-              active && { backgroundColor: colors.surface },
-              active && styles.segmentActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                { color: active ? colors.accent : colors.textMuted },
-                active && styles.segmentTextActive,
-              ]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Icon name={icon} size={17} color={colors.accent} strokeWidth={2} />
+        <View style={styles.sectionHeaderText}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+          {hint ? (
+            <Text style={[styles.sectionHint, { color: colors.textMuted }]}>{hint}</Text>
+          ) : null}
+        </View>
+      </View>
+      <Card>{children}</Card>
     </View>
   );
 }
@@ -240,15 +222,16 @@ export default function SettingsScreen() {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxl }]}
       keyboardShouldPersistTaps="handled"
     >
-      <Section title="外观" hint="深色/浅色两套配色由主色自动派生">
-        <Segmented
+      <Section icon="palette" title="外观" hint="深浅两套配色与强调色由主色自动派生">
+        <SegmentedControl
           options={THEME_OPTIONS}
           value={prefs.themeMode}
           onChange={(value) => updatePrefs({ themeMode: value })}
         />
+
         <View style={styles.swatchRow}>
           {ACCENT_PRESETS.map((preset) => {
             const active = preset.value.toLowerCase() === prefs.accent.toLowerCase();
@@ -256,67 +239,59 @@ export default function SettingsScreen() {
               <Pressable
                 key={preset.value}
                 onPress={() => updatePrefs({ accent: preset.value })}
-                style={[
-                  styles.swatch,
-                  { backgroundColor: preset.value },
-                  active && { borderColor: colors.text, borderWidth: 2 },
-                ]}
+                accessibilityRole="button"
                 accessibilityLabel={`主色 ${preset.name}`}
+                accessibilityState={{ selected: active }}
+                style={[
+                  styles.swatchWrap,
+                  { borderColor: active ? colors.text : 'transparent' },
+                ]}
               >
-                {active ? (
-                  <Text style={[styles.swatchCheck, { color: readableOn(preset.value) }]}>✓</Text>
-                ) : null}
+                <View style={[styles.swatch, { backgroundColor: preset.value }]}>
+                  {active ? (
+                    <Icon
+                      name="check"
+                      size={16}
+                      color={readableOn(preset.value)}
+                      strokeWidth={3}
+                    />
+                  ) : null}
+                </View>
               </Pressable>
             );
           })}
         </View>
       </Section>
 
-      <Section title="跟吹视图" hint="以判定线为基准，远端收窄形成近大远小">
-        <Segmented
+      <Section icon="target" title="跟吹视图" hint="以判定线为基准，远端收窄形成近大远小">
+        <SegmentedControl
           options={PERSPECTIVE_OPTIONS}
           value={prefs.perspective}
           onChange={(value) => updatePrefs({ perspective: value })}
         />
       </Section>
 
-      <Section title="口琴预设" hint="切换后跟吹页立即按新琴重排指法">
-        {LAYOUTS.map((item) => {
-          const active = item.id === selectedId;
-          return (
-            <Pressable
-              key={item.id}
-              onPress={() => handleSelect(item.id)}
-              style={({ pressed }) => [
-                styles.preset,
-                { backgroundColor: colors.surfaceAlt },
-                active && { backgroundColor: colors.accentSoft },
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={styles.presetText}>
-                <Text
-                  style={[
-                    styles.presetName,
-                    { color: active ? colors.accent : colors.text },
-                  ]}
-                >
-                  {item.name}
-                </Text>
-                <Text style={[styles.presetMeta, { color: colors.textMuted }]}>
-                  {item.holes.length} 孔 · {item.key} 调
-                  {Object.prototype.hasOwnProperty.call(prefs.layoutOverrides, item.id)
-                    ? ' · 已校对'
-                    : ''}
-                </Text>
-              </View>
-              {active ? <Text style={[styles.check, { color: colors.accent }]}>当前</Text> : null}
-            </Pressable>
-          );
-        })}
+      <Section icon="harp" title="口琴预设" hint="切换后跟吹页立即按新琴重排指法">
+        <View style={styles.presetList}>
+          {LAYOUTS.map((item) => {
+            const active = item.id === selectedId;
+            const corrected = Object.prototype.hasOwnProperty.call(prefs.layoutOverrides, item.id);
+            return (
+              <Row
+                key={item.id}
+                title={item.name}
+                subtitle={`${item.holes.length} 孔 · ${item.key} 调${corrected ? ' · 已校对' : ''}`}
+                leading={<IconTile name="harp" size={36} tone={active ? 'accent' : 'neutral'} />}
+                selected={active}
+                onPress={() => handleSelect(item.id)}
+                accessibilityLabel={`口琴预设 ${item.name}`}
+              />
+            );
+          })}
+        </View>
       </Section>
 
-      <Section title="音阶表校对" hint="音名写法：C4 / A4 / Bb4 / C#5">
+      <Section icon="pencil" title="音阶表校对" hint="音名写法：C4 / A4 / Bb4 / C#5">
         {layout.notes ? (
           <Text style={[styles.layoutNotes, { color: colors.textMuted }]}>{layout.notes}</Text>
         ) : null}
@@ -347,8 +322,11 @@ export default function SettingsScreen() {
                     style={[
                       styles.cell,
                       styles.input,
-                      { backgroundColor: colors.surfaceAlt, color: colors.text },
-                      invalid && { borderColor: colors.danger, borderWidth: 1 },
+                      {
+                        backgroundColor: colors.surfaceAlt,
+                        borderColor: invalid ? colors.danger : colors.border,
+                        color: colors.text,
+                      },
                     ]}
                     value={value}
                     onChangeText={(text) => updateCell(hole.index, column.key, text)}
@@ -365,46 +343,37 @@ export default function SettingsScreen() {
         })}
 
         {message ? (
-          <Text style={[styles.message, { color: colors.textMuted }]}>{message}</Text>
+          <View style={[styles.notice, { backgroundColor: colors.accentSoft }]}>
+            <Icon name="info" size={15} color={colors.accent} />
+            <Text style={[styles.noticeText, { color: colors.accent }]}>{message}</Text>
+          </View>
         ) : null}
         {invalidCount > 0 ? (
-          <Text style={[styles.error, { color: colors.danger }]}>
-            有 {invalidCount} 处音名无法识别，请修正后再保存
-          </Text>
+          <View style={[styles.notice, { backgroundColor: colors.dangerSoft }]}>
+            <Icon name="alert" size={15} color={colors.danger} />
+            <Text style={[styles.noticeText, { color: colors.danger }]}>
+              有 {invalidCount} 处音名无法识别，请修正后再保存
+            </Text>
+          </View>
         ) : null}
 
         <View style={styles.actions}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.button,
-              { backgroundColor: colors.accent },
-              invalidCount > 0 && styles.buttonDisabled,
-              pressed && styles.pressed,
-            ]}
+          <Button
+            label="保存音阶表"
+            icon="check"
+            fullWidth
             onPress={handleSave}
             disabled={invalidCount > 0}
-          >
-            <Text style={[styles.buttonText, { color: colors.onAccent }]}>保存音阶表</Text>
-          </Pressable>
+          />
           {hasOverride ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.button,
-                styles.buttonGhost,
-                { borderColor: colors.border },
-                pressed && styles.pressed,
-              ]}
-              onPress={handleRestore}
-            >
-              <Text style={[styles.buttonText, { color: colors.text }]}>恢复默认</Text>
-            </Pressable>
+            <Button label="恢复默认" variant="ghost" fullWidth onPress={handleRestore} />
           ) : null}
         </View>
       </Section>
 
-      <Text style={[styles.footer, { color: colors.textMuted }]}>
-        建议用自己的琴逐孔核对音阶表；默认排列在不同品牌间可能存在差异。
-      </Text>
+      <View style={styles.footer}>
+        <Badge icon="alert" tone="warning" label="默认音阶排列因品牌而异，建议用实体琴逐孔核对" />
+      </View>
     </ScrollView>
   );
 }
@@ -412,81 +381,51 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 16, gap: 14 },
-  section: {
-    borderRadius: 12,
-    padding: 14,
-  },
-  sectionTitle: { fontSize: 15, fontWeight: '600' },
-  sectionHint: { marginTop: 4, fontSize: 12, lineHeight: 17 },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    padding: 3,
-    marginTop: 12,
-  },
-  segment: {
-    flex: 1,
-    height: 34,
-    borderRadius: 8,
+  content: { padding: spacing.lg, gap: spacing.xl },
+  section: { gap: spacing.sm + 2 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  sectionHeaderText: { flex: 1, gap: 2 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  sectionHint: { fontSize: 12, lineHeight: 17 },
+  swatchRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  swatchWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  segmentActive: {
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  segmentText: { fontSize: 13 },
-  segmentTextActive: { fontWeight: '600' },
-  swatchRow: { flexDirection: 'row', gap: 12, marginTop: 14 },
   swatch: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 0,
   },
-  swatchCheck: { fontSize: 16, fontWeight: '700' },
-  preset: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 10,
-  },
-  pressed: { opacity: 0.75 },
-  presetText: { flex: 1 },
-  presetName: { fontSize: 14, fontWeight: '600' },
-  presetMeta: { marginTop: 2, fontSize: 12 },
-  check: { fontSize: 13, fontWeight: '600' },
-  layoutNotes: { marginTop: 8, fontSize: 12, lineHeight: 17 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+  presetList: { gap: spacing.sm },
+  layoutNotes: { fontSize: 12, lineHeight: 17, marginBottom: spacing.sm },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
   headerText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
   holeIndex: { width: 34, fontSize: 12, textAlign: 'center' },
   cell: { flex: 1, fontSize: 13, textAlign: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs + 2 },
   input: {
     marginHorizontal: 2,
-    height: 34,
-    borderRadius: 6,
+    height: 36,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: 0,
   },
-  message: { marginTop: 12, fontSize: 12, lineHeight: 17 },
-  error: { marginTop: 8, fontSize: 12 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  button: {
-    flex: 1,
-    height: 46,
-    borderRadius: 10,
+  notice: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
   },
-  buttonGhost: { backgroundColor: 'transparent', borderWidth: 1 },
-  buttonDisabled: { opacity: 0.45 },
-  buttonText: { fontSize: 15, fontWeight: '600' },
-  footer: { fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  noticeText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  actions: { gap: spacing.sm, marginTop: spacing.lg },
+  footer: { alignItems: 'center' },
 });
