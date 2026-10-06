@@ -15,7 +15,12 @@ import { arrange } from '../src/core/arrange';
 import { LAYOUTS } from '../src/core/layouts';
 import type { Score } from '../src/core/model';
 import { parse } from '../src/core/parsers';
-import { midiToNoteName } from '../src/core/pitch';
+import {
+  formatJianpu,
+  keySignatureToTonicPc,
+  midiToJianpu,
+  midiToNoteName,
+} from '../src/core/pitch';
 
 const ABC_SAMPLE = `X:1
 T:欢乐颂（ABC 片段）
@@ -134,6 +139,32 @@ function main(): void {
   }
 
   console.log(`\n✓ 解析与编配流程跑通（MIDI 60 = ${midiToNoteName(60)}）`);
+
+  // 简谱自检（见 docs/TECH_DESIGN.md §7.6）
+  const jianpuChecks: [number, number, string][] = [
+    [60, 0, '1'], // C 调 C4 → 1
+    [62, 0, '2'], // C 调 D4 → 2
+    [61, 0, '#1'], // C 调 C#4 → #1
+    [72, 0, '1·'], // C 调高八度 C5 → 1·
+    [48, 0, '·1'], // C 调低八度 C3 → ·1
+    [67, 7, '1'], // G 调 G4 → 1
+    [79, 7, '1·'], // G 调高八度 G5 → 1·
+  ];
+  for (const [midi, tonicPc, expected] of jianpuChecks) {
+    const actual = formatJianpu(midiToJianpu(midi, tonicPc));
+    const ok = actual === expected;
+    console.log(`${ok ? '✓' : '✗'} 简谱 ${midi}(主音${tonicPc}) → ${actual}（期望 ${expected}）`);
+    if (!ok) process.exitCode = 1;
+  }
+
+  // 调号 → 主音自检
+  const keyChecks: [string, number][] = [['C', 0], ['G', 7], ['F', 5], ['Bb', 10], ['A', 9]];
+  for (const [key, expected] of keyChecks) {
+    const actual = keySignatureToTonicPc(key);
+    const ok = actual === expected;
+    console.log(`${ok ? '✓' : '✗'} 调号 ${key} → 主音音级 ${actual}（期望 ${expected}）`);
+    if (!ok) process.exitCode = 1;
+  }
 }
 
 main();
