@@ -4,7 +4,7 @@
 
 - 技术栈：Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · Reanimated 4 · react-native-svg
 - 交付形态：安装到 Android 手机的独立 App（出包走 EAS 云端构建，**本地不需要装 Java/Android Studio**）
-- 详细设计：[docs/PRD.md](./docs/PRD.md)（需求）· [docs/TECH_DESIGN.md](./docs/TECH_DESIGN.md)（技术方案，**§11 为构建与部署方案**）
+- 详细设计：[docs/PRD.md](./docs/PRD.md)（需求）· [docs/TECH_DESIGN.md](./docs/TECH_DESIGN.md)（技术方案，**§11 为构建与部署方案**）· [docs/AI_SCORING.md](./docs/AI_SCORING.md)（录音评测方案，规划中）
 
 ---
 
