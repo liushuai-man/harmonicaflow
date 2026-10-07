@@ -1,8 +1,14 @@
 # 口琴跟吹助手 HarmonicaFlow — 技术方案
 
-- 版本：v0.4.0
+- 版本：v0.5.0
 - 日期：2026-10-06
 - 关联文档：[PRD.md](./PRD.md) · [ARCHITECTURE.md](./ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，**远期规划**）
+
+> v0.5.0 变更摘要（**T3：音频时钟接管时序**，不改消费侧）：
+> ① §2 新增运行时依赖 `expo-audio` + 必需 peer `expo-asset`（本项目首次新增运行时依赖，均为 Expo 官方模块、Expo Go 内置）；
+> ② 新增 `player/timeSource.ts`（`createAudioClock`），把音频进度换算到时间轴坐标（**音频 0s ↔ `LEAD_IN_MS`**）并收口 play/pause/seek/变速；
+> ③ `usePlayback` 增加可选参数 `audioUri`：无伴奏时行为不变（本地计时器），有伴奏时以 **300ms 周期 / 80ms 容差**校准音频时钟（§7.1 / §7.2 / §12.2）；
+> ④ 跟吹页新增「伴奏」入口（运行期选文件，**不持久化**——与曲目绑定属 T4）。
 
 > v0.4.0 变更摘要（对 v0.3.0 的**开工前修订**，不新增功能）：
 > ① 视觉参数与几何**下沉到平台无关层** `core/visual/`（原 `ui/timeline/params.ts`）——纯数据 + 纯函数，PC / Web 可直接复用；
@@ -73,7 +79,7 @@
 
 ---
 
-## 2. 依赖清单（运行时共 7 项）
+## 2. 依赖清单（运行时共 9 项）
 
 | 依赖 | 版本策略 | 用途 |
 |---|---|---|
@@ -84,6 +90,8 @@
 | `react-native-svg` | Expo 内置 | 绘制音块 |
 | `expo-document-picker` | 随 SDK | 选择乐谱文件 |
 | `expo-file-system` | 随 SDK | 读文件 + 曲库持久化 |
+| `expo-audio` | 随 SDK | 播放伴奏音频（T3：音频时钟接管时序） |
+| `expo-asset` | 随 SDK | `expo-audio` 的**必需 peer 依赖**，缺失时 Expo Go 之外会崩 |
 | `fast-xml-parser` + `fflate` | 纯 JS / MIT | MusicXML 解析、.mxl 解压 |
 
 > 音名与 MIDI 互转自行实现（12 半音表），不引入 `@tonaljs/*`。
@@ -94,6 +102,8 @@
 > 本地缓存复用 `expo-file-system`；命中高亮用 `react-native-reanimated` 共享值。
 > 后续的 UI 设计系统（`theme/tokens.ts` + `ui/components/`，见 §7.8）同样零新增依赖：图标用已有的
 > `react-native-svg` 手绘，组件为项目内代码而非第三方库。
+> **v0.5.0（T3）是本项目首次新增运行时依赖**：`expo-audio`（播放伴奏）+ 其必需 peer `expo-asset`。
+> 两者均为 Expo 官方模块、Expo Go 内置，且**不含自定义原生代码**，因此 Expo Go 与 EAS 出包都不受影响。
 
 ### 2.1 出包方式（EAS 云端构建）
 
@@ -284,10 +294,18 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 ```
 含 `LEAD_IN_MS = 2000` 的起吹留白。
 
+**音频时钟接管（v0.5.0 / T3）**：伴奏音频的播放进度以**时间轴坐标**记账——第一个音块位于 `positionMs = LEAD_IN_MS`，故定义 **音频 0s ↔ 时间轴 `LEAD_IN_MS`**（`audioStartMs = LEAD_IN_MS`）。`LEAD_IN_MS` 保持不变，因此**时间轴 / 特效 / 命中高亮等消费侧一行未改**，只换了供给侧时钟。
+
 ### 7.2 播放状态机（`player/usePlayback.ts`）
 
 - 以 Reanimated 共享值 `positionMs` 承载播放位置，`play()` 用 `withTiming(totalMs, { duration: (totalMs - from)/speed, easing: linear })` 驱动，暂停时 `cancelAnimation` 并从当前值续播。
-- 对外暴露：`positionMs / isPlaying / speed / play / pause / restart / seek(ms) / setSpeed(x)`；倍速档位 `SPEED_OPTIONS = [0.5, 0.75, 1]`。
+- 对外暴露：`positionMs / isPlaying / speed / play / pause / restart / seek(ms) / setSpeed(x)`；倍速档位 `SPEED_OPTIONS = [0.5, 0.75, 1]`。函数签名新增可选第三参 `audioUri`，**不传时行为与以前完全一致**（本地计时器）。
+- **两套时钟（供给侧的桥接，见 §12.2）**：
+  - **无伴奏**（默认）：本地 `withTiming` 计时器驱动，唯一时钟。
+  - **有伴奏**：本地 `withTiming` 仍在 UI 线程负责**平滑推进**；另按 300ms 周期读取音频时钟（`player.currentTime`），当偏差超过 **80ms 容差**时才重锚一次。这样既不引入 `withTiming` 之外的抖动，又把漂移钉在感知阈值以内（音频可辨识的规律性偏差约为 ±100ms）。回调频率不足或耗电不可接受时，退路是「本地计时器为主 + 音频仅作伴奏」，**不阻塞后续任务**。
+  - 起吹留白：`positionMs < LEAD_IN_MS` 期间伴奏尚未起播，由本地计时器跑完 `(LEAD_IN_MS − from) / speed` 后 `seekTo(0) + play()` 交接；暂停 / 拖动 / 变速会取消或重排这个交接定时器。
+  - 变速：`setSpeed` 同时写 `player.playbackRate`；音频播放位置与滚动位置的换算天然一致（都以 `speed` 推进），故无需在 `playbackRate` 上二次换算。
+  - 音频时钟实现收口在 [`player/timeSource.ts`](../src/player/timeSource.ts)（`createAudioClock`），`usePlayback` 不直接依赖 expo-audio 的 API 细节。
 
 ### 7.3 时间轴渲染（`ui/NoteTimeline.tsx`，双向单视图）
 
@@ -511,7 +529,7 @@ src/core/                 model.ts · pitch.ts · arrange.ts · text.ts（UTF-8 
 src/core/layouts/         tremolo24C.ts · diatonic10C.ts · chromatic12C.ts · index.ts   ← 口琴音阶预设
 src/core/parsers/         json.ts · abc.ts · musicxml.ts · index.ts
 src/core/visual/          params.ts（视觉常量）· flow.ts（方向接口 + 几何纯函数）      ← v0.4.0 新增，零 RN 依赖
-src/player/               timing.ts · usePlayback.ts（内部走 TimeSource 接口）
+src/player/               timing.ts · usePlayback.ts · timeSource.ts（音频时钟）
 src/theme/                color.ts · palette.ts · skin.ts · tokens.ts · ThemeProvider.tsx
 src/ui/                   NoteTimeline.tsx（双向单视图）· StaffBar.tsx（横向琴谱）· TransportBar.tsx（播放控件）
 src/ui/components/        Icon.tsx · Card.tsx · Button.tsx · Badge.tsx · IconTile.tsx · SegmentedControl.tsx · Slider.tsx · Row.tsx · HarmonicaMark.tsx · SongCover.tsx · index.ts
@@ -644,12 +662,13 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 
 ### 12.2 时序接缝（音乐播放器 / 导入本地音乐）
 
-- 现在 `usePlayback` 用**本地计时器**（Reanimated `withTiming`）驱动 `positionMs`。
-- 抽出 `TimeSource` 接口（`now()` / `play()` / `pause()` / `seek()` / `duration`）：本地计时器是其一个实现；后期接入音频播放器（如 `expo-audio`）时新增"音频时钟"实现即可。
-- **⚠️ 接缝不是"零成本"（v0.4.0 修正）**：`positionMs` 是 **UI 线程上的 Reanimated 共享值**，而音频播放器的播放进度由**原生侧**（`expo-audio` 的回调 / 事件）给出，两者**不在同一线程、也不能直接赋值**。因此"音频时钟"实现必须补一段**桥接**：
-  - 用 `useFrameCallback`（或基于 `requestAnimationFrame` 的循环）逐帧读取原生播放位置，**写回 `positionMs.value`**，让 UI 线程继续按共享值驱动滚动；
-  - 或者，若播放器能提供高频进度回调，在回调里 `runOnUI` 更新共享值（回调频率不足时会看到抖动，需实测）。
-  - 结论：**消费侧（时间轴 / 特效 / 命中高亮）确实不用改**，因为它们只读 `positionMs`；但要改的是**供给侧的桥接**——这正是"换音频源"的真实工作量，评估 P5 时不能忽略。
+- `usePlayback` 用**本地计时器**（Reanimated `withTiming`）驱动 `positionMs`，这是**默认且唯一**的时钟（无伴奏时）。
+- **T3 已落地**：接入 `expo-audio` 后，`player/timeSource.ts` 提供 `createAudioClock(player, leadInMs)`——把音频进度换算回时间轴坐标，并收口 `play/pause/seek/变速`；`usePlayback` 通过可选参数 `audioUri` 在「本地时钟」与「音频时钟」之间切换（见 §7.2）。时间轴坐标约定为 **音频 0s ↔ `LEAD_IN_MS`**。
+  - 说明：本地计时器**仍保留 `withTiming` 形态**（UI 线程插值），未改造成 pull 式的 `TimeSource` 实现——因为那样会把无伴奏（当前默认路径）的平滑性降级为轮询。音频时钟以「周期校准」的方式成为权威：既平滑又不漂移。
+- **⚠️ 接缝不是"零成本"（v0.4.0 修正，v0.5.0 落地）**：`positionMs` 是 **UI 线程上的 Reanimated 共享值**，而音频播放器的进度来自**原生侧**，两者**不在同一线程、也不能直接赋值**，必须补一段**桥接**。T3 采用的方案是**周期校准**（而非逐帧写回）：
+  - 本地 `withTiming` 继续在 UI 线程插值（保证 60fps 平滑），JS 侧每 300ms 读一次 `player.currentTime`，偏差超 80ms 才重锚 `positionMs`。
+  - 之所以不逐帧写回：`withTiming` 已在 UI 线程平滑推进，逐帧写反而会引入 JS 定时器的抖动，且每帧跨线程写共享值更耗电；周期校准同时满足「不抖动」与「不漂移」。
+  - 结论：**消费侧（时间轴 / 特效 / 命中高亮）确实不用改**，因为它们只读 `positionMs`；改的是**供给侧的桥接**——这正是"换音频源"的真实工作量。
 - "导入本地音乐"= 给曲目附加一个本地音频 `uri`（存 `library.json`），UI 增加一个"选择音频"入口。
 
 ### 12.3 外部能力接缝（Agent / AI 点评）

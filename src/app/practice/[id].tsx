@@ -37,6 +37,8 @@ export default function PracticeScreen() {
   const [result, setResult] = useState<ArrangeResult | null>(null);
   const [timeline, setTimeline] = useState<TimelineInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 伴奏仅本次会话有效（持久化与曲目绑定见 PLAN.md T4）
+  const [audioUri, setAudioUri] = useState<string | null>(null);
 
   // 载入曲目（仅依赖 id）
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function PracticeScreen() {
     setResult(null);
     setTimeline(null);
     setError(null);
+    setAudioUri(null);
     (async () => {
       try {
         const list = await listLibrary();
@@ -101,6 +104,20 @@ export default function PracticeScreen() {
     }
   }, [entry]);
 
+  const handlePickAudio = useCallback(async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: 'audio/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled) return;
+      setAudioUri(picked.assets[0].uri);
+    } catch {
+      // 选伴奏失败不阻塞跟吹
+    }
+  }, []);
+
   useEffect(() => {
     if (!score) return;
     try {
@@ -115,6 +132,7 @@ export default function PracticeScreen() {
   const { positionMs, isPlaying, speed, play, pause, restart, seek, setSpeed } = usePlayback(
     timeline?.totalMs ?? 0,
     prefs.speed,
+    audioUri ?? undefined,
   );
 
   useEffect(() => {
@@ -161,6 +179,13 @@ export default function PracticeScreen() {
             {layout.holes.length} 孔
           </Text>
         </View>
+        <Button
+          label={audioUri ? '伴奏已选' : '伴奏'}
+          icon="music"
+          variant="ghost"
+          size="sm"
+          onPress={handlePickAudio}
+        />
         <Button
           label="更换"
           icon="settings"

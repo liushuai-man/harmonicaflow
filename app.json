@@ -8,7 +8,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-audio",
+      "expo-asset"
     ],
     "ios": {
       "supportsTablet": true
