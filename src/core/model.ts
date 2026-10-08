@@ -19,6 +19,36 @@ export interface NoteEvent {
   lyric?: string;
 }
 
+/**
+ * 解析诊断：区分「完全支持」与「可用但简化」（见 docs/TECH_DESIGN.md §5.1）。
+ * 「无法练习」不产出 Score —— 解析器直接抛错，故不在此枚举内。
+ */
+export type ParseSupport = 'full' | 'simplified';
+
+export interface ScoreDiagnostic {
+  /** 稳定代码，便于断言与去重，如 'abc.repeat' */
+  code: string;
+  /** 面向用户的简短说明 */
+  message: string;
+}
+
+export interface ParseDiagnostics {
+  support: ParseSupport;
+  /** 被忽略 / 简化的内容；support === 'full' 时为空 */
+  notes: ScoreDiagnostic[];
+}
+
+/** 由诊断条目构造报告：按 code 去重，有条目即为「可用但简化」 */
+export function makeDiagnostics(notes: ScoreDiagnostic[]): ParseDiagnostics {
+  const seen = new Set<string>();
+  const unique = notes.filter((note) => {
+    if (seen.has(note.code)) return false;
+    seen.add(note.code);
+    return true;
+  });
+  return { support: unique.length > 0 ? 'simplified' : 'full', notes: unique };
+}
+
 /** 统一中间表示：任何来源的乐谱都被解析成它 */
 export interface Score {
   id: string;
@@ -32,6 +62,8 @@ export interface Score {
   keySignature?: string;
   events: NoteEvent[];
   source: SourceFormat;
+  /** 解析诊断：语义简化 / 被忽略的内容（见 docs/TECH_DESIGN.md §5.1） */
+  diagnostics: ParseDiagnostics;
 }
 
 /** 口琴上的一对孔位（复音/布鲁斯：blow+draw；半音阶：再含推键） */
@@ -46,7 +78,7 @@ export interface Hole {
   drawPush?: number | null;
 }
 
-export type HarmonicaType = 'tremolo24' | 'diatonic10' | 'chromatic12';
+export type HarmonicaType = 'tremolo24' | 'single24' | 'diatonic10' | 'chromatic12';
 
 export interface HarmonicaLayout {
   id: string;

@@ -81,6 +81,8 @@ export interface Prefs {
   onlineCover: boolean;
   /** 用户校对后的音阶表覆盖：layoutId → holes */
   layoutOverrides: Record<string, Hole[]>;
+  /** 用户为该琴选择的调号：layoutId → 调号（如 'G'）；缺省时用预设自带调号 */
+  layoutKeys: Record<string, string>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -95,6 +97,7 @@ export const DEFAULT_PREFS: Prefs = {
   staffBar: DEFAULT_STAFF_BAR,
   onlineCover: DEFAULT_ONLINE_COVER,
   layoutOverrides: {},
+  layoutKeys: {},
 };
 
 const SCORES_DIR = 'scores';
@@ -295,6 +298,7 @@ export async function loadPrefs(): Promise<Prefs> {
       staffBar: pickEnum(parsed.staffBar, ['full', 'hint', 'off'] as const, DEFAULT_PREFS.staffBar),
       onlineCover: parsed.onlineCover === true,
       layoutOverrides: parsed.layoutOverrides ?? {},
+      layoutKeys: parsed.layoutKeys ?? {},
     };
   } catch {
     return DEFAULT_PREFS;

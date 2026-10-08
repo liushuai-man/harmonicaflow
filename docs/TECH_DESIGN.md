@@ -1,8 +1,18 @@
 # 口琴跟吹助手 HarmonicaFlow — 技术方案
 
-- 版本：v0.6.0
+- 版本：v0.8.0
 - 日期：2026-10-08
 - 关联文档：[PRD.md](./PRD.md) · [ARCHITECTURE.md](./ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，**远期规划**）
+
+> v0.8.0 变更摘要（**口琴模型：单音 24 孔 + 调 / 音 / 孔可配置**）：
+> ① §3 `HarmonicaType` 新增 `single24`；§4.4 新增「单音 24 孔（C 调）」预设（单簧，音位与 24 孔复音一致，作为独立模型便于区分与校对）；
+> ② §8 `Prefs` 新增 `layoutKeys`（按 layoutId 记录用户所选调号，缺省回落到预设自带调号，无需迁移）；
+> ③ 设置页「音阶表校对」区新增**调号选择**（换调按就近半音整表移调，会覆盖手动校对）、**孔数增删**（行即孔，至少保留 1 孔）与逐孔音名编辑；纯函数 `keyShift` / `transposeHoles` 收敛在 `core/layouts`，`verify` 有断言。
+
+> v0.7.0 变更摘要（**T0：谱面语义与诊断**）：
+> ① §3 模型新增 `Score.diagnostics`（`ParseSupport` / `ScoreDiagnostic` / `ParseDiagnostics`），区分「完全支持」与「可用但简化」；
+> ② §5 / §5.1 落地解析语义：ABC `K:` 调号作用到音、`Q:` 按拍号单位折算 BPM；MusicXML 和弦保最高音且不推进游标、多 voice 归一化为单旋律、延音线按声部合并；
+> ③ 被忽略的反复 / 变速 / 多声部 / 多余 part 记入诊断，样本与断言在 `scripts/verify-core.ts`。
 
 > v0.6.0 文档修订：区分当前实现与目标契约，修正缓存、存储扩展和线程边界的过度承诺；UI 原则见 [UI_DESIGN.md](./UI_DESIGN.md)。本次不改代码或默认数值。以下版本摘要仅为历史，当前正文优先。
 
@@ -149,6 +159,20 @@ export interface Score {
   keySignature?: string;          // 如 "C" / "G"
   events: NoteEvent[];
   source: SourceFormat;
+  diagnostics: ParseDiagnostics;  // 解析诊断（见 §5.1）
+}
+
+/** 解析诊断：区分「完全支持」与「可用但简化」；「无法练习」不产出 Score，解析器直接抛错 */
+export type ParseSupport = 'full' | 'simplified';
+
+export interface ScoreDiagnostic {
+  code: string;      // 稳定代码，便于断言与去重，如 'abc.repeat'
+  message: string;   // 面向用户的简短说明
+}
+
+export interface ParseDiagnostics {
+  support: ParseSupport;
+  notes: ScoreDiagnostic[];       // 被忽略 / 简化的内容；support === 'full' 时为空
 }
 
 /** 口琴上的一对孔位（复音/布鲁斯：blow+draw；半音阶：再含 push） */
@@ -163,7 +187,7 @@ export interface Hole {
 export interface HarmonicaLayout {
   id: string;
   name: string;
-  type: 'tremolo24' | 'diatonic10' | 'chromatic12';
+  type: 'tremolo24' | 'single24' | 'diatonic10' | 'chromatic12';
   key: string;
   holes: Hole[];
   notes?: string;                 // 排列来源 / 待校对说明
@@ -239,6 +263,13 @@ export interface TabNote extends NoteEvent {
 
 - 推键（push）使音高 +1 半音，即 `blowPush = blow + 1`、`drawPush = draw + 1`。
 
+### 4.4 单音 24 孔（C 调）
+
+「单音」指每个音孔**单簧**发声（复音为双簧微失谐）；**音位排列与 24 孔复音一致**（1/3/5 吹、2/4/6/7 吸，见表 4.1）。作为独立模型便于与复音区分与校对。
+
+- 设置页可**选择调号**（`core/layouts` 的 `KEY_OPTIONS`）：换调时对预设基准表按**就近半音**（−6..+6）整体移调，结果落盘为音阶表覆盖（会覆盖已手动校对的内容）；「恢复默认」同时清掉调号与音阶表覆盖，回到预设基准。
+- **孔数可增删**：音阶表按行（孔）编辑，可增删行；保存时按行序重排孔号（1 起），因此孔数与排列都是可编辑数据，算法里没有任何硬编码。
+
 ---
 
 ## 5. 解析器设计
@@ -254,18 +285,18 @@ parse(content: string | Uint8Array, filename: string): Score
 | 解析器 | 实现要点 |
 |---|---|
 | `json.ts` | 直接校验并映射为 `Score`；支持 `note` 音名或 `midi` 数字；tick 或分数拍 |
-| `abc.ts` | 实现常用子集：头部 `X/T/M/L/K/Q`；音名 `CDEFGAB` + 八度 `'` `,`；临时记号 `^ _ =`；时值倍数 `2`、`/2`、`3/2`；小节线、连音 `-`、休止 `z`。`L:` 定义默认时值，`Q:` 或默认 120 取速度 |
-| `musicxml.ts` | `fast-xml-parser` 解析；遍历 `score-partwise/part/measure/note`：取 `pitch(step,alter,octave)`、`duration`、`rest`、`chord`、`tie`；用 `divisions` 把 duration 折算为 tick（`ppq` 固定为 480）；`backup`/`forward` 处理多声部时间轴；`<sound tempo>` 或默认 120 取速度。`.mxl` 先用 `fflate` 解压出 `META-INF/container.xml` 指向的根 XML |
+| `abc.ts` | 实现常用子集：头部 `X/T/M/L/K/Q`；音名 `CDEFGAB` + 八度 `'` `,`；临时记号 `^ _ =`（`=` 显式还原）；时值倍数 `2`、`/2`、`3/2`；小节线、连音 `-`、休止 `z`。`L:` 定义默认时值；`K:` 调号**作用到未临时记号的音**，`Q:` 按拍号单位折算为四分 BPM（`1/8=120` → 60）。反复 / 多声部 / 行内 `K:`/`Q:` 变更记入诊断 |
+| `musicxml.ts` | `fast-xml-parser` 解析；遍历 `score-partwise/part/measure/note`：取 `pitch(step,alter,octave)`、`duration`、`rest`、`chord`、`tie`；用 `divisions` 把 duration 折算为 tick（`ppq` 固定为 480）；`backup`/`forward` 处理多声部时间轴；`<sound tempo>` 或默认 120 取速度。和弦只保留最高音且**不推进游标**；多 voice 归一化为单旋律（选音数最多的声部）；延音线按声部合并。`.mxl` 先用 `fflate` 解压出 `META-INF/container.xml` 指向的根 XML |
 
-> **现状与目标分开**：当前 MusicXML 默认取第一个 `part`；同一 part 内多 voice 的旋律选择尚未形成可靠契约，和弦最高音分支也有游标比较问题。当前返回 `Score`，没有解析诊断报告，不能声称已统计所有丢弃内容。
+> **现状与目标分开**：MusicXML 只取第一个 `part`；同一 part 内多 voice 按「音数最多」选主声部并记入诊断，**不等于主旋律识别**。和弦游标与多声部重叠问题已修，统一由 `Score.diagnostics` 记录被忽略的内容（见 §5.1）。
 
-### 5.1 语义正确性与诊断（待实现，PLAN T0）
+### 5.1 语义正确性与诊断（基础契约已落地，PLAN T0）
 
-- 解析成功不等于语义正确。先修 ABC 调号及 Q 节拍单位、MusicXML 和弦/多声部，再建立“解析 → 单旋律归一化 → 编配”的纯函数边界；首个 part 只是默认选择，不能等同主旋律识别。
-- 诊断应区分完全支持、可用但简化、无法练习；记录被忽略的声部/反复/变速等信息。不支持且影响音高或时序的内容不能静默假装正确。
+- 解析成功不等于语义正确。已修 ABC 调号及 Q 节拍单位、MusicXML 和弦/多声部；建立“解析 → 单旋律归一化 → 编配”的纯函数边界。首个 part 只是默认选择，不能等同主旋律识别。
+- 诊断区分完全支持（`full`）与可用但简化（`simplified`）；「无法练习」不产出 `Score`，解析器直接抛错。已记录被忽略的声部 / 反复 / 变速（`Score.diagnostics.notes`，含稳定 `code`）。不支持且影响音高或时序的内容不静默假装正确。
 - 可恢复的内容保留并提示；无法得到可靠音符时明确失败，保留其他曲目和原文件，不编造音符。“降级”不表示所有输入都必须成功，也不与 ACCEPTANCE 的 L1/L2/L3 验证级别混用。
 - 当前模型只有单一 BPM/拍号/调号。先声明匀速子集与限制；一般变速谱支持需另设计按 tick 的 tempo map 与分段时间换算，不靠音频校时补偿谱面语义错误。
-- 新增诊断/旋律契约前同步更新 §3 模型与测试样本，不在呈现组件中补解析规则。
+- 诊断 / 旋律契约的样本与断言在 `scripts/verify-core.ts` 的 `verifyParsers()`；模型字段变更须同步 §3 与测试样本，不在呈现组件中补解析规则。
 
 ---
 
@@ -485,6 +516,7 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 | `staffBar` | `'full' \| 'hint' \| 'off'` | 横向琴谱条模式，缺省 `hint` |
 | `onlineCover` | `boolean` | 是否允许在线随机封面，缺省 `false` |
 | `layoutOverrides` | `Record<string, Hole[]>` | 音阶表校对覆盖，按 layoutId 存放 |
+| `layoutKeys` | `Record<string, string>` | 用户为该琴选择的调号（按 layoutId 存放）；缺省用预设自带调号 |
 
 - 旧字段 `orientation` 已移除；旧字段 `perspective`（枚举）**升级为 `viewAngle`（数值）**，读取时把旧枚举映射为角度（`off→0` / `weak→22` / `strong→34`）新字段在下一次 savePrefs 时写回；读取时忽略未知字段，缺失字段回落到默认值（向后兼容旧 `prefs.json`）。
 - 为避免设置页与主题层互相覆盖，新增 `store/prefs.tsx` 的 `PrefsProvider` / `usePrefs()`，写操作一律走 `updatePrefs(patch)`（读-合并-写），主题与设置页共用同一份状态。
@@ -547,7 +579,7 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 ```
 src/app/                  _layout.tsx · index.tsx · practice/[id].tsx · settings.tsx
 src/core/                 model.ts · pitch.ts · arrange.ts · text.ts（UTF-8 / 字节解码）
-src/core/layouts/         tremolo24C.ts · diatonic10C.ts · chromatic12C.ts · index.ts   ← 口琴音阶预设
+src/core/layouts/         tremolo24C.ts · single24C.ts · diatonic10C.ts · chromatic12C.ts · index.ts   ← 口琴音阶预设
 src/core/parsers/         json.ts · abc.ts · musicxml.ts · index.ts
 src/core/visual/          params.ts（视觉常量）· flow.ts（方向接口 + 几何纯函数）      ← v0.4.0 新增，零 RN 依赖
 src/player/               timing.ts · usePlayback.ts · timeSource.ts（音频时钟）

@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 
 import { arrange } from '../src/core/arrange';
-import { LAYOUTS } from '../src/core/layouts';
+import { LAYOUTS, keyShift, single24C, transposeHoles } from '../src/core/layouts';
 import type { Score } from '../src/core/model';
 import { parse } from '../src/core/parsers';
 import {
@@ -81,6 +81,67 @@ function loadSample(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf8');
 }
 
+// ── T0 语义回归样本（见 docs/PLAN.md T0 / ACCEPTANCE.md §3.0）──
+
+/** ABC：G 调 F 应升为 F#，显式 =F 还原；Q:1/8=120 折算为 60 BPM */
+const ABC_KEY_SAMPLE = `X:1
+T:G 调与节拍单位
+M:4/4
+L:1/4
+Q:1/8=120
+K:G
+F2 =F2 |
+`;
+
+/** ABC：反复记号应被提示为「可用但简化」 */
+const ABC_REPEAT_SAMPLE = `X:1
+T:带反复
+M:4/4
+L:1/4
+K:C
+|: C D E F :|
+`;
+
+/** MusicXML：和弦只保留最高音（含游标不推进），后续音起始正确 */
+const MUSICXML_CHORD_SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Melody</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration></note>
+      <note><chord/><pitch><step>E</step><octave>5</octave></pitch><duration>1</duration></note>
+      <note><pitch><step>G</step><octave>5</octave></pitch><duration>1</duration></note>
+      <note><chord/><pitch><step>B</step><octave>4</octave></pitch><duration>1</duration></note>
+    </measure>
+  </part>
+</score-partwise>
+`;
+
+/** MusicXML：同 part 两个 voice（backup 回退），归并为主声部且不产生重叠 */
+const MUSICXML_VOICE_SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Melody</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration><voice>1</voice></note>
+      <backup><duration>2</duration></backup>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>2</voice></note>
+    </measure>
+  </part>
+</score-partwise>
+`;
+
+/** MusicXML：第二个 part 应被忽略并提示 */
+const MUSICXML_MULTIPART_SAMPLE = MUSICXML_CHORD_SAMPLE.replace(
+  '</score-partwise>',
+  `<part id="P2"><measure number="1">
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration></note>
+    </measure></part>
+</score-partwise>`,
+);
+
 /** 把内联 MusicXML 样本包成 .mxl（含 META-INF/container.xml），用于验证压缩谱面导入 */
 function buildMxl(withContainer: boolean): Uint8Array {
   const files: Record<string, Uint8Array> = { 'score.xml': strToU8(MUSICXML_SAMPLE) };
@@ -97,6 +158,7 @@ function buildMxl(withContainer: boolean): Uint8Array {
 function describe(score: Score): void {
   console.log(`\n### ${score.title}（来源：${score.source}，ppq=${score.ppq}，tempo=${score.tempoBpm}）`);
   console.log(`- 音符数：${score.events.length}，拍号：${score.timeSignature.join('/')}，调号：${score.keySignature ?? '-'}`);
+  console.log(`- 诊断：${score.diagnostics.support}${score.diagnostics.notes.length ? `（${score.diagnostics.notes.map((n) => n.message).join('；')}）` : ''}`);
 
   for (const layout of LAYOUTS) {
     const { notes, stats } = arrange(score, layout);
@@ -117,6 +179,60 @@ function describe(score: Score): void {
 function check(label: string, ok: boolean, detail = ''): void {
   console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` → ${detail}` : ''}`);
   if (!ok) process.exitCode = 1;
+}
+
+/** T0 谱面语义与诊断自检（见 docs/PLAN.md T0 / ACCEPTANCE.md §3.0） */
+function verifyParsers(): void {
+  console.log('\n### T0 谱面语义与诊断自检');
+
+  // T0-1 ABC 调号与 Q 节拍单位
+  const abcKey = parse(ABC_KEY_SAMPLE, 'key.abc', 'abc-key');
+  check('ABC Q:1/8=120 折算为 60 BPM', abcKey.tempoBpm === 60, `${abcKey.tempoBpm}`);
+  check('G 调未记号的 F 升为 F#(66)', abcKey.events[0]?.midi === 66, `${abcKey.events[0]?.midi}`);
+  check('显式 =F 还原为 F(65)', abcKey.events[1]?.midi === 65, `${abcKey.events[1]?.midi}`);
+
+  // T0-2 MusicXML 和弦与多声部
+  const chord = parse(MUSICXML_CHORD_SAMPLE, 'chord.musicxml', 'xml-chord');
+  check(
+    '和弦只保留最高音',
+    chord.events.length === 2 && chord.events[0]?.midi === 76,
+    `midi=[${chord.events.map((e) => e.midi).join(',')}]`,
+  );
+  check('和弦不推进游标（后续音起始正确）', chord.events[1]?.startTicks === 480, `${chord.events[1]?.startTicks}`);
+
+  const voice = parse(MUSICXML_VOICE_SAMPLE, 'voice.musicxml', 'xml-voice');
+  const noOverlap = voice.events.every(
+    (event, i) => i === 0 || event.startTicks >= voice.events[i - 1].startTicks + voice.events[i - 1].durationTicks,
+  );
+  check('多声部归并为单声部且无重叠', voice.events.length === 1 && noOverlap, `${voice.events.length} 个音`);
+  check(
+    '多声部有诊断提示',
+    voice.diagnostics.notes.some((n) => n.code === 'musicxml.multiVoice'),
+    voice.diagnostics.support,
+  );
+
+  // T0-3 支持边界与诊断契约
+  const repeat = parse(ABC_REPEAT_SAMPLE, 'repeat.abc', 'abc-repeat');
+  check(
+    'ABC 反复记号提示为 simplified',
+    repeat.diagnostics.support === 'simplified' && repeat.diagnostics.notes.some((n) => n.code === 'abc.repeat'),
+  );
+  const multiPart = parse(MUSICXML_MULTIPART_SAMPLE, 'multipart.musicxml', 'xml-multipart');
+  check('多余 part 被忽略并提示', multiPart.diagnostics.notes.some((n) => n.code === 'musicxml.multiPart'));
+  const jsonFull = parse(loadSample('assets/songs/twinkle.json'), 'twinkle.json', 'diag-json');
+  check('JSON 完全支持（无诊断）', jsonFull.diagnostics.support === 'full' && jsonFull.diagnostics.notes.length === 0);
+}
+
+/** 口琴预设与调号移调自检（见 docs/TECH_DESIGN.md §4.4） */
+function verifyLayouts(): void {
+  console.log('\n### 口琴预设与调号移调自检');
+  check('单音 24 孔共 24 孔', single24C.holes.length === 24, `${single24C.holes.length}`);
+  check('单音 24 孔默认 C 调', single24C.key === 'C', single24C.key);
+  check('C→G 就近移调 −5 半音', keyShift('C', 'G') === -5, `${keyShift('C', 'G')}`);
+  check('C→F 就近移调 +5 半音', keyShift('C', 'F') === 5, `${keyShift('C', 'F')}`);
+  const upFifth = transposeHoles(single24C.holes, 7);
+  check('整体 +7：孔 1 吹 C4(60) → G4(67)', upFifth[0]?.blow === 67, `${upFifth[0]?.blow}`);
+  check('整体 +7：孔 2 吸 D4(62) → A4(69)', upFifth[1]?.draw === 69, `${upFifth[1]?.draw}`);
 }
 
 function verifyCoreVisual(): void {
@@ -288,6 +404,9 @@ function main(): void {
   }
 
   // 视觉几何自检（见 docs/TECH_DESIGN.md §7.11 / §9.1）
+  verifyParsers();
+  verifyLayouts();
+
   console.log('\n### core/visual 方向与视角几何自检');
   verifyCoreVisual();
 }

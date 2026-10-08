@@ -1,4 +1,5 @@
 import type { NoteEvent, Score } from '../model';
+import { makeDiagnostics } from '../model';
 import { tryNoteNameToMidi } from '../pitch';
 
 /**
@@ -102,5 +103,6 @@ export function parseJson(content: string, id: string): Score {
     keySignature: typeof obj.keySignature === 'string' ? obj.keySignature : undefined,
     events,
     source: 'json',
+    diagnostics: makeDiagnostics([]),
   };
 }

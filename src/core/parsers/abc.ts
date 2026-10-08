@@ -1,21 +1,73 @@
-import type { NoteEvent, Score } from '../model';
+import type { NoteEvent, Score, ScoreDiagnostic } from '../model';
+import { makeDiagnostics } from '../model';
 import { DEFAULT_PPQ, parseFraction } from './json';
 
 /**
  * ABC 记谱解析器（常用子集）
  *
  * 支持：
- *   - 头部字段 X / T / M / L / K / Q
+ *   - 头部字段 X / T / M / L / K / Q（K: 调号会作用到未临时记号的音）
  *   - 音名 A-G（大写 = 第 4 八度 / 小写 = 高一个八度），八度记号 ' 与 ,
- *   - 临时记号 ^ ^^ _ __ =（按小节记忆）
+ *   - 临时记号 ^ ^^ _ __ =（按小节记忆，可覆盖调号；= 表示显式还原）
  *   - 时值倍数 2 / /2 / // / 3/2，默认时值来自 L:
  *   - 休止 z / x，连音 -，和弦 [CEG]（取最高音），小节线（同时清除临时记号记忆）
  *   - 装饰记号 ^"" ^!! ^{}、行内字段 [K:...]、% 注释均被跳过
  *
- * 不支持（会被安全跳过）：多声部 &、反复记号语义、装饰音实际演奏。
+ * 不支持（安全跳过并记入诊断，见 docs/TECH_DESIGN.md §5.1）：
+ *   多声部 &、反复记号 |: :| ::、volta 括号 [1 [2、行内调号 / 速度变更。
  */
 
 const LETTER_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+/** 调号升 / 降序（五度圈顺序） */
+const SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
+const FLAT_ORDER = ['B', 'E', 'A', 'D', 'G', 'C', 'F'];
+
+/** K: 的音阶模式 → 相对同名大调的调号偏移（五度圈） */
+const MODE_FIFTHS_OFFSET: Record<string, number> = {
+  maj: 0, ion: 0, ionian: 0,
+  lyd: 1, lydian: 1,
+  mix: -1, mixolydian: -1,
+  dor: -2, dorian: -2,
+  min: -3, m: -3, aeol: -3, aeolian: -3,
+  phr: -4, phrygian: -4,
+  loc: -5, locrian: -5,
+};
+
+/** 由 K: 值算出「字母 → 升降」；未出现的字母 = 0（见 docs/TECH_DESIGN.md §5） */
+function keyAccidentals(keyValue: string): Map<string, number> {
+  const result = new Map<string, number>();
+  const first = keyValue.trim().split(/\s+/)[0] ?? '';
+  const m = /^([A-Ga-g])([#^_b♯♭]?)(.*)$/.exec(first);
+  if (!m) return result;
+  const letter = m[1].toUpperCase();
+  const acc = m[2];
+  const modeText = m[3].toLowerCase().replace(/[^a-z]/g, '');
+  const accOffset = acc === '#' || acc === '^' || acc === '♯' ? 1 : acc === 'b' || acc === '_' || acc === '♭' ? -1 : 0;
+  const tonicPc = (LETTER_PC[letter] ?? 0) + accOffset;
+  // 大调：f ≡ tonicPc·7 (mod 12) 落在 [-7, 7]；再叠加音阶模式的五度偏移
+  let fifths = ((((tonicPc * 7) % 12) + 12) % 12);
+  if (fifths > 7) fifths -= 12;
+  fifths += MODE_FIFTHS_OFFSET[modeText] ?? 0;
+  fifths = Math.max(-7, Math.min(7, fifths));
+  if (fifths > 0) for (let i = 0; i < fifths; i += 1) result.set(SHARP_ORDER[i], 1);
+  else for (let i = 0; i < -fifths; i += 1) result.set(FLAT_ORDER[i], -1);
+  return result;
+}
+
+/** Q: 值 → 四分音符 BPM；支持 "1/8=120"（按拍号单位折算）、"C=120"、纯数字 */
+function parseAbcTempo(qValue: string): number {
+  const fractional = /(\d+)\s*\/\s*(\d+)\s*=\s*(\d+(?:\.\d+)?)/.exec(qValue);
+  if (fractional) {
+    const unit = Number(fractional[1]) / Number(fractional[2]);
+    const count = Number(fractional[3]);
+    if (unit > 0 && count > 0) return Math.round(count * unit * 4);
+  }
+  const equals = /=\s*(\d+(?:\.\d+)?)/.exec(qValue);
+  const bare = /^\s*(\d+(?:\.\d+)?)\s*$/.exec(qValue);
+  const count = Number((equals ?? bare)?.[1]);
+  return Number.isFinite(count) && count > 0 ? count : 120;
+}
 
 export function parseAbc(content: string, id: string): Score {
   const ppq = DEFAULT_PPQ;
@@ -55,10 +107,17 @@ export function parseAbc(content: string, id: string): Score {
 
   let tempoBpm = 120;
   const qValue = headers.get('Q');
-  if (qValue) {
-    const m = /=\s*(\d+(?:\.\d+)?)/.exec(qValue) ?? /(\d+(?:\.\d+)?)/.exec(qValue);
-    const parsed = m ? Number(m[1]) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) tempoBpm = parsed;
+  if (qValue) tempoBpm = parseAbcTempo(qValue);
+
+  // 调号作用到所有未临时记号的音（见 docs/TECH_DESIGN.md §5 / §5.1）
+  const keyAcc = keyAccidentals(headers.get('K') ?? 'C');
+  const diagnostics: ScoreDiagnostic[] = [];
+  // 不支持语义：只做提示，不改变线性演奏（见 docs/TECH_DESIGN.md §5.1）
+  if (/\|:|:\||::/.test(body)) {
+    diagnostics.push({ code: 'abc.repeat', message: '忽略反复记号，按线性顺序演奏' });
+  }
+  if (body.includes('&')) {
+    diagnostics.push({ code: 'abc.multiVoice', message: '忽略多声部（&），仅解析单声部' });
   }
 
   // ── 正文扫描 ─────────────────────────────────────────
@@ -177,6 +236,13 @@ export function parseAbc(content: string, id: string): Score {
       continue;
     }
     if (ch === '[') {
+      // volta 括号 [1 / [2：无闭合符，仅跳过标记本身
+      if (/[0-9]/.test(body[i + 1] ?? '')) {
+        i += 1;
+        while (i < n && /[0-9]/.test(body[i])) i += 1;
+        diagnostics.push({ code: 'abc.volta', message: '忽略 volta 反复括号，按线性顺序演奏' });
+        continue;
+      }
       const end = body.indexOf(']', i);
       if (end < 0) {
         i += 1;
@@ -184,7 +250,13 @@ export function parseAbc(content: string, id: string): Score {
       }
       const inner = body.slice(i + 1, end);
       i = end + 1;
-      if (/^[A-Za-z]:/.test(inner)) continue; // 行内字段 [K:...]
+      if (/^[A-Za-z]:/.test(inner)) {
+        // 行内字段 [K:...] / [Q:...]：改变调号或速度，当前忽略
+        const field = inner[0].toUpperCase();
+        if (field === 'K') diagnostics.push({ code: 'abc.inlineKey', message: '忽略行内调号变更' });
+        else if (field === 'Q') diagnostics.push({ code: 'abc.inlineTempo', message: '忽略行内速度变更' });
+        continue;
+      }
       const chord = readChordNotes(inner);
       const duration = defaultLenTicks * readLengthMultiplier();
       if (chord.length > 0) {
@@ -219,7 +291,7 @@ export function parseAbc(content: string, id: string): Score {
         accidentalMemory.set(memoryKey, accOffset);
         pendingAccidental = null;
       } else {
-        accOffset = accidentalMemory.get(memoryKey) ?? 0;
+        accOffset = accidentalMemory.get(memoryKey) ?? keyAcc.get(letter) ?? 0;
       }
       const midi = (octave + 1) * 12 + LETTER_PC[letter] + accOffset;
       pushNote(midi, defaultLenTicks * readLengthMultiplier());
@@ -253,5 +325,6 @@ export function parseAbc(content: string, id: string): Score {
     keySignature: headers.get('K') || undefined,
     events,
     source: 'abc',
+    diagnostics: makeDiagnostics(diagnostics),
   };
 }

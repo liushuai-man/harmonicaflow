@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { LAYOUTS, getLayout } from '../core/layouts';
+import { KEY_OPTIONS, LAYOUTS, getLayout, keyShift, transposeHoles } from '../core/layouts';
 import type { Hole } from '../core/model';
 import { midiToNoteName, tryNoteNameToMidi } from '../core/pitch';
 import {
@@ -93,7 +93,8 @@ interface CellDraft {
   drawPush: string;
 }
 
-type Draft = Record<number, CellDraft>;
+/** 每行对应一个孔，行序即孔序（1 起）；数组长度即孔数，可增删 */
+type Draft = CellDraft[];
 
 type ColumnKey = keyof CellDraft;
 
@@ -102,16 +103,19 @@ function cellText(midi: number | null | undefined): string {
 }
 
 function holesToDraft(holes: Hole[], chromatic: boolean): Draft {
-  const draft: Draft = {};
-  for (const hole of holes) {
-    draft[hole.index] = {
-      blow: cellText(hole.blow),
-      draw: cellText(hole.draw),
-      blowPush: chromatic ? cellText(hole.blowPush) : '',
-      drawPush: chromatic ? cellText(hole.drawPush) : '',
-    };
-  }
-  return draft;
+  return holes.map((hole) => ({
+    blow: cellText(hole.blow),
+    draw: cellText(hole.draw),
+    blowPush: chromatic ? cellText(hole.blowPush) : '',
+    drawPush: chromatic ? cellText(hole.drawPush) : '',
+  }));
+}
+
+const EMPTY_CELL: CellDraft = { blow: '', draw: '', blowPush: '', drawPush: '' };
+
+/** 预设自带的基准调号（用户未选调号时的回落值） */
+function layoutBaseKey(id: string): string {
+  return (LAYOUTS.find((item) => item.id === id) ?? LAYOUTS[0]).key;
 }
 
 function parseCell(value: string): { midi: number | null; valid: boolean } {
@@ -151,10 +155,12 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { prefs, ready, updatePrefs } = usePrefs();
-  const [draft, setDraft] = useState<Draft>({});
+  const [draft, setDraft] = useState<Draft>([]);
   const [message, setMessage] = useState<string | null>(null);
 
   const selectedId = prefs.layoutId;
+  /** 当前琴的调号：用户选择优先，否则用预设自带调号 */
+  const currentKey = prefs.layoutKeys[selectedId] ?? layoutBaseKey(selectedId);
 
   /** 视角预设：当前角度若不是预设值，就临时加一个显示实际角度的选项，避免高亮错位 */
   const presetOptions = useMemo(() => {
@@ -195,15 +201,13 @@ export default function SettingsScreen() {
 
   const invalidCount = useMemo(() => {
     let count = 0;
-    for (const hole of layout.holes) {
-      const cell = draft[hole.index];
-      if (!cell) continue;
+    for (const cell of draft) {
       for (const column of columns) {
         if (!parseCell(cell[column.key]).valid) count += 1;
       }
     }
     return count;
-  }, [draft, layout, columns]);
+  }, [draft, columns]);
 
   const handleSelect = useCallback(
     async (id: string) => {
@@ -214,18 +218,38 @@ export default function SettingsScreen() {
     [selectedId, updatePrefs],
   );
 
+  /** 选择调号：按新调对预设基准表整体移调并落盘（会覆盖该琴的手动校对） */
+  const handleSelectKey = useCallback(
+    async (key: string) => {
+      if (key === currentKey) return;
+      const base = LAYOUTS.find((item) => item.id === selectedId) ?? LAYOUTS[0];
+      const shift = keyShift(base.key, key);
+      const overrides = { ...prefs.layoutOverrides };
+      if (shift === 0) {
+        delete overrides[selectedId];
+      } else {
+        overrides[selectedId] = transposeHoles(base.holes, shift);
+      }
+      await updatePrefs({
+        layoutKeys: { ...prefs.layoutKeys, [selectedId]: key },
+        layoutOverrides: overrides,
+      });
+      setMessage(`已把「${base.name}」切到 ${key} 调，音阶表按新调整体移调`);
+    },
+    [currentKey, prefs.layoutKeys, prefs.layoutOverrides, selectedId, updatePrefs],
+  );
+
   const handleSave = useCallback(async () => {
     if (invalidCount > 0) return;
-    const holes: Hole[] = layout.holes.map((hole) => {
-      const cell = draft[hole.index];
+    const holes: Hole[] = draft.map((cell, i) => {
       const next: Hole = {
-        index: hole.index,
-        blow: parseCell(cell?.blow ?? '').midi,
-        draw: parseCell(cell?.draw ?? '').midi,
+        index: i + 1,
+        blow: parseCell(cell.blow).midi,
+        draw: parseCell(cell.draw).midi,
       };
       if (isChromatic) {
-        next.blowPush = parseCell(cell?.blowPush ?? '').midi;
-        next.drawPush = parseCell(cell?.drawPush ?? '').midi;
+        next.blowPush = parseCell(cell.blowPush).midi;
+        next.drawPush = parseCell(cell.drawPush).midi;
       }
       return next;
     });
@@ -237,21 +261,28 @@ export default function SettingsScreen() {
       layoutId: selectedId,
       layoutOverrides: { ...prefs.layoutOverrides, [selectedId]: holes },
     });
-    setMessage(`已保存「${layout.name}」的音阶表，跟吹页会立即按新表重排指法`);
+    setMessage(`已保存「${layout.name}」的音阶表（${holes.length} 孔），跟吹页会立即按新表重排指法`);
   }, [invalidCount, layout, draft, isChromatic, prefs.layoutOverrides, selectedId, updatePrefs]);
 
   const handleRestore = useCallback(async () => {
     const overrides = { ...prefs.layoutOverrides };
     delete overrides[selectedId];
-    await updatePrefs({ layoutId: selectedId, layoutOverrides: overrides });
-    setMessage(`已恢复「${layout.name}」的默认音阶表`);
-  }, [prefs.layoutOverrides, selectedId, updatePrefs, layout.name]);
+    const keys = { ...prefs.layoutKeys };
+    delete keys[selectedId];
+    await updatePrefs({ layoutId: selectedId, layoutOverrides: overrides, layoutKeys: keys });
+    setMessage(`已恢复「${layout.name}」的默认音阶表与调号`);
+  }, [prefs.layoutOverrides, prefs.layoutKeys, selectedId, updatePrefs, layout.name]);
 
-  const updateCell = useCallback((holeIndex: number, key: ColumnKey, text: string) => {
-    setDraft((prev) => ({
-      ...prev,
-      [holeIndex]: { ...prev[holeIndex], [key]: text },
-    }));
+  const updateCell = useCallback((rowIndex: number, key: ColumnKey, text: string) => {
+    setDraft((prev) => prev.map((cell, i) => (i === rowIndex ? { ...cell, [key]: text } : cell)));
+  }, []);
+
+  const handleAddHole = useCallback(() => {
+    setDraft((prev) => [...prev, { ...EMPTY_CELL }]);
+  }, []);
+
+  const handleRemoveHole = useCallback(() => {
+    setDraft((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   }, []);
 
   if (!ready) {
@@ -376,7 +407,7 @@ export default function SettingsScreen() {
               <Row
                 key={item.id}
                 title={item.name}
-                subtitle={`${item.holes.length} 孔 · ${item.key} 调${corrected ? ' · 已校对' : ''}`}
+                subtitle={`${item.holes.length} 孔 · ${prefs.layoutKeys[item.id] ?? item.key} 调${corrected ? ' · 已校对' : ''}`}
                 leading={<IconTile name="harp" size={36} tone={active ? 'accent' : 'neutral'} />}
                 selected={active}
                 onPress={() => handleSelect(item.id)}
@@ -392,6 +423,52 @@ export default function SettingsScreen() {
           <Text style={[styles.layoutNotes, { color: colors.textMuted }]}>{layout.notes}</Text>
         ) : null}
 
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>调号</Text>
+        <View style={styles.keyRow}>
+          {KEY_OPTIONS.map((key) => {
+            const active = key === currentKey;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => handleSelectKey(key)}
+                accessibilityRole="button"
+                accessibilityLabel={`调号 ${key}`}
+                accessibilityState={{ selected: active }}
+                style={[
+                  styles.keyChip,
+                  {
+                    backgroundColor: active ? colors.accent : colors.surfaceAlt,
+                    borderColor: active ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.keyChipText,
+                    { color: active ? readableOn(colors.accent) : colors.text },
+                  ]}
+                >
+                  {key}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={[styles.inlineHint, { color: colors.textMuted }]}>
+          切换调号会按新调整体移调当前音阶表（覆盖手动校对）
+        </Text>
+
+        <View style={styles.holeActions}>
+          <Button label="增加一孔" variant="ghost" fullWidth onPress={handleAddHole} />
+          <Button
+            label="删除末孔"
+            variant="ghost"
+            fullWidth
+            disabled={draft.length <= 1}
+            onPress={handleRemoveHole}
+          />
+        </View>
+
         <View style={styles.headerRow}>
           <Text style={[styles.holeIndex, styles.headerText, { color: colors.textMuted }]}>孔</Text>
           {columns.map((column) => (
@@ -404,39 +481,36 @@ export default function SettingsScreen() {
           ))}
         </View>
 
-        {layout.holes.map((hole) => {
-          const cell = draft[hole.index];
-          return (
-            <View key={hole.index} style={styles.row}>
-              <Text style={[styles.holeIndex, { color: colors.textMuted }]}>{hole.index}</Text>
-              {columns.map((column) => {
-                const value = cell?.[column.key] ?? '';
-                const invalid = !parseCell(value).valid;
-                return (
-                  <TextInput
-                    key={column.key}
-                    style={[
-                      styles.cell,
-                      styles.input,
-                      {
-                        backgroundColor: colors.surfaceAlt,
-                        borderColor: invalid ? colors.danger : colors.border,
-                        color: colors.text,
-                      },
-                    ]}
-                    value={value}
-                    onChangeText={(text) => updateCell(hole.index, column.key, text)}
-                    placeholder="—"
-                    placeholderTextColor={colors.placeholder}
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    spellCheck={false}
-                  />
-                );
-              })}
-            </View>
-          );
-        })}
+        {draft.map((cell, rowIndex) => (
+          <View key={rowIndex} style={styles.row}>
+            <Text style={[styles.holeIndex, { color: colors.textMuted }]}>{rowIndex + 1}</Text>
+            {columns.map((column) => {
+              const value = cell[column.key] ?? '';
+              const invalid = !parseCell(value).valid;
+              return (
+                <TextInput
+                  key={column.key}
+                  style={[
+                    styles.cell,
+                    styles.input,
+                    {
+                      backgroundColor: colors.surfaceAlt,
+                      borderColor: invalid ? colors.danger : colors.border,
+                      color: colors.text,
+                    },
+                  ]}
+                  value={value}
+                  onChangeText={(text) => updateCell(rowIndex, column.key, text)}
+                  placeholder="—"
+                  placeholderTextColor={colors.placeholder}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  spellCheck={false}
+                />
+              );
+            })}
+          </View>
+        ))}
 
         {message ? (
           <View style={[styles.notice, { backgroundColor: colors.accentSoft }]}>
@@ -501,6 +575,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   presetList: { gap: spacing.sm },
+  keyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  keyChip: {
+    minWidth: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  keyChipText: { fontSize: 13, fontWeight: '600' },
+  inlineHint: { fontSize: 11, lineHeight: 16, marginTop: spacing.sm },
+  holeActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   layoutNotes: { fontSize: 12, lineHeight: 17, marginBottom: spacing.sm },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
   headerText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
