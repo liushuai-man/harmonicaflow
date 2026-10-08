@@ -1,8 +1,13 @@
 # 口琴跟吹助手 HarmonicaFlow — 技术方案
 
-- 版本：v0.8.0
+- 版本：v0.9.0
 - 日期：2026-10-08
 - 关联文档：[PRD.md](./PRD.md) · [ARCHITECTURE.md](./ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，**远期规划**）
+
+> v0.9.0 变更摘要（**T4：导入本地音乐并关联曲目**）：
+> ① §8 新增伴奏持久化：`audio.json`（曲目 id → 持久引用）+ `audio/` 沙盒目录，`LibraryEntry` 增加 `audioUri` / `audioLost`；替换与删除曲目时清理旧文件；
+> ② 新增 `store/audioCache.ts`（复制字节 / 解析可播 URI / 删除），`bindAudio` / `clearAudio` 收敛在 `store/library.ts`；
+> ③ §12.1 / §12.2 更新接缝说明：docStore 消费者增列 `audioCache.ts`，伴奏绑定落地（Web 端不落字节，不跨会话）。
 
 > v0.8.0 变更摘要（**口琴模型：单音 24 孔 + 调 / 音 / 孔可配置**）：
 > ① §3 `HarmonicaType` 新增 `single24`；§4.4 新增「单音 24 孔（C 调）」预设（单簧，音位与 24 孔复音一致，作为独立模型便于区分与校对）；
@@ -524,9 +529,11 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 - 曲库索引：`Paths.document + 'library.json'`，当前写入 { version, entries } 包装，entries 为导入曲目元数据；封面映射另存 covers.json。ID 使用原生 MD5 或回退字节哈希，跨平台不能假定哈希算法/ID 一致；未来同步需统一内容身份契约。
 - 导入的原始文件复制到 `Paths.document + 'scores/{id}.{ext}'` 保存，重复导入以 `File.md5` 内容哈希去重（哈希命中则不重复写盘）。
 - 封面映射实际保存在 `covers.json`，兼容内置与导入曲目；原生本地导入及可选在线封面均可产生缓存字节，Web 不缓存图片字节。`LibraryEntry.coverUri` 是读取映射后合并的字段。
+- 伴奏绑定实际保存在 `audio.json`（映射 曲目 id → 持久引用），兼容内置与导入曲目；原生把音频字节复制到 `audio/{id}.{ext}` 后记相对路径，Web 不落字节、直接记原始 URI（T4）。`LibraryEntry.audioUri` 由引用解析而来，文件缺失时改置 `audioLost` 供 UI 提示重新选择。替换伴奏与删除曲目会同步清理旧音频文件，不留孤儿。
 - 内置示例曲随包发布（`assets/songs/*.json`），以 `builtin:` 前缀虚拟成条目，**不复制到文件系统**。
 - **缓存现状**：`loadScore` 只有按曲目 ID 的 `Score` 内存缓存；首页与跟吹页仍各自计算 arrange。共享编配缓存尚未实现；若性能证据需要，缓存键必须包含谱面身份、音阶表实际内容（含 overrides）、编配参数与算法版本，不能只用曲目 ID。删除、改谱或改音阶时有明确失效策略。
-- **可靠性目标（待实施）**：偏好及索引须校验/迁移；连续写入顺序、失败恢复与损坏数据提示要有测试。当前文件写入不等于原子事务，不把解析失败回空数组当作完整恢复方案。持久化音频须通过 docStore 复制并管理生命周期。
+- **可靠性目标（待实施）**：偏好及索引须校验/迁移；连续写入顺序、失败恢复与损坏数据提示要有测试。当前文件写入不等于原子事务，不把解析失败回空数组当作完整恢复方案。
+- **持久化音频（T4 已落地）**：经 docStore 复制到 `audio/` 并由 `audio.json` 记录绑定与所有权；替换/删除时清理旧文件，读取时解析引用、失效置 `audioLost` 供 UI 提示（见 `store/audioCache.ts`）。Web 端不落字节，绑定不跨会话。
 - **`store/docStore.ts` 是唯一存储边界**（`readText / writeText / readBytes / writeBytes` + 路径解析 + `supportsBinaryCache`），上层业务与组件不直接触碰 `expo-file-system` / `localStorage`；Web 端用 `localStorage`、原生端用应用沙盒，同一组 API 内部按平台分派。
 - 全部走 expo-file-system 新 API（`File` / `Directory` / `Paths`），不引入 AsyncStorage。
 
@@ -587,7 +594,7 @@ src/theme/                color.ts · palette.ts · skin.ts · tokens.ts · Them
 src/ui/                   NoteTimeline.tsx（双向单视图）· StaffBar.tsx（横向琴谱）· TransportBar.tsx（播放控件）
 src/ui/components/        Icon.tsx · Card.tsx · Button.tsx · Badge.tsx · IconTile.tsx · SegmentedControl.tsx · Slider.tsx · Row.tsx · HarmonicaMark.tsx · SongCover.tsx · index.ts
 src/ui/effects/           types.ts · registry.ts · pulse.tsx
-src/store/                docStore.ts（唯一存储边界）· library.ts · prefs.tsx · coverCache.ts
+src/store/                docStore.ts（唯一存储边界）· library.ts · prefs.tsx · coverCache.ts · audioCache.ts
 assets/songs/             内置示例曲 JSON
 assets/covers/            可选内置封面
 scripts/verify-core.ts    核心逻辑验证脚本（含 core/visual 边界断言）
@@ -709,7 +716,7 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 
 ### 12.1 存储接缝（后端 / 云同步）
 
-- `store/docStore.ts` 是**唯一**读写入口，`library.ts` / `prefs.tsx` / `coverCache.ts` 都经它读写。
+- `store/docStore.ts` 是**唯一**读写入口，`library.ts` / `prefs.tsx` / `coverCache.ts` / `audioCache.ts` 都经它读写。
 - 后期同步另设编排层，复用本地仓储与独立远端适配器，处理身份、队列、版本、冲突与删除。docStore 保持本地 I/O；页面按需展示状态，不承诺零改动。
 - 只有第二个独立消费者需要共享包时才拆接口与平台实现，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。
 
@@ -722,7 +729,7 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
   - 本地 `withTiming` 继续在 UI 线程插值（目标为平滑滚动，帧率需实测），JS 侧每 300ms 读一次 `player.currentTime`，偏差超 80ms 才重锚 `positionMs`。
   - 之所以不逐帧写回：`withTiming` 已在 UI 线程平滑推进，逐帧写反而会引入 JS 定时器的抖动，且每帧跨线程写共享值更耗电；周期校准是当前实现选择，不能据此宣称已满足「不抖动」与「不漂移」。
   - 结论：**消费侧（时间轴 / 特效 / 命中高亮）确实不用改**，因为它们只读 `positionMs`；改的是**供给侧的桥接**——这正是"换音频源"的真实工作量。
-- 持久伴奏需通过 docStore 复制到持久目录、记录绑定及资源所有权，并处理替换/删除/失败恢复，不能只保存临时 URI。音频起点与谱面起点、BPM 必须匹配；自动内容对齐未实现，周期校时仅处理时钟漂移。
+- 持久伴奏（**T4 已落地**）经 docStore 复制到持久目录（`audio/`），由 `audio.json` 记录绑定及所有权，并处理替换/删除/失败恢复，不只是保存临时 URI（见 §8 与 `store/audioCache.ts`）。音频起点与谱面起点、BPM 必须匹配；自动内容对齐未实现，周期校时仅处理时钟漂移。
 
 ### 12.3 外部能力接缝（Agent / AI 点评）
 

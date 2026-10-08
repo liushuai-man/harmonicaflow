@@ -1,6 +1,6 @@
 # 口琴跟吹助手 HarmonicaFlow — 后续任务规划
 
-> **版本**：v0.3.0 ｜ **更新日期**：2026-10-08 ｜ **状态**：设计修订；不代表新增能力已实现或验收
+> **版本**：v0.5.0 ｜ **更新日期**：2026-10-08 ｜ **状态**：设计修订；不代表新增能力已实现或验收
 >
 > **阅读须知**：本文只回答「**接下来做什么、按什么顺序、产出什么**」，是 [ARCHITECTURE.md](./ARCHITECTURE.md) §11 路线图在**近期阶段**的展开。
 > 需求本身仍以 [PRD.md](./PRD.md) 为准，技术方案以 [TECH_DESIGN.md](./TECH_DESIGN.md) 为准，**验收标准与验证方式见 [ACCEPTANCE.md](./ACCEPTANCE.md)**。
@@ -109,6 +109,7 @@
 | **具体行动** | 复用文件选择，经 docStore 复制音频到持久目录，记录绑定与资源所有权，处理迁移/替换/失败恢复/删除。沿用已有伴奏入口，不能仅保存临时选择 URI |
 | **产出物** | `LibraryEntry` 增加音频字段 + 跟吹页入口 + 持久化 |
 | **验收** | 见 [ACCEPTANCE.md](./ACCEPTANCE.md) §3 的 T4 表 |
+| **状态** | **L1 已完成**（`tsc` / `lint` / `verify` / `expo-doctor` 四门禁全绿）：新增 `store/audioCache.ts`（复制字节进 `audio/`、解析可播 URI、删除），`store/library.ts` 落地 `audio.json` 绑定与 `bindAudio` / `clearAudio`，`LibraryEntry` 增加 `audioUri` / `audioLost`，跟吹页入口改为持久绑定并提示伴奏失效。**T4-2 的「重启后仍可读」与 T4-1 / T4-4 待真机 / L3 复核**；T4-3 已由 `deleteEntry` 清理路径覆盖（L2 代码审阅）。 |
 
 ---
 
@@ -184,3 +185,4 @@
 | v0.2.0 | 2026-10-06 | T3 落地 L1：回填 T3「状态」，记录音频时钟采用「周期校准」而非「逐帧写回」 |
 | v0.3.0 | 2026-10-08 | 新增 T0，扩展 T1 品牌与可读性设计，修正 Web/博客方向与实现/验收状态；未实施代码 |
 | v0.4.0 | 2026-10-08 | T0 落地 L1/L2：ABC 调号与 Q 单位、MusicXML 和弦/多声部归一化、`Score.diagnostics` 契约；T0-4 待真机 |
+| v0.5.0 | 2026-10-08 | T4 落地 L1：`audio.json` 伴奏绑定 + `audioCache.ts` + `LibraryEntry.audioUri/audioLost`；T4 真机项待 L3 |

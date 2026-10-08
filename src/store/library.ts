@@ -24,6 +24,7 @@ import {
   writeBytes,
   writeText,
 } from './docStore';
+import { importLocalAudio, removeLocalAudio, resolveAudioUri } from './audioCache';
 
 import twinkleSong from '../../assets/songs/twinkle.json';
 import odeToJoySong from '../../assets/songs/ode-to-joy.json';
@@ -58,6 +59,10 @@ export interface LibraryEntry {
   importedAt: number;
   /** 用户为这首曲目选的封面（本地图片 URI 或（开启开关后）缓存的远程 URL） */
   coverUri?: string;
+  /** 用户为这首曲目绑定的伴奏（可播放 URI）；未绑定则缺省 */
+  audioUri?: string;
+  /** 曾绑定伴奏但文件已不可读（被外部删除 / 沙盒清理）；UI 据此提示重新选择 */
+  audioLost?: boolean;
 }
 
 export interface Prefs {
@@ -105,6 +110,8 @@ const INDEX_PATH = 'library.json';
 const PREFS_PATH = 'prefs.json';
 /** 封面单独存：内置曲目不在 library.json 索引里，用 id → uri 映射才能一并覆盖 */
 const COVERS_PATH = 'covers.json';
+/** 伴奏单独存：理由同封面（内置曲也能绑定），映射 id → 持久引用 */
+const AUDIO_PATH = 'audio.json';
 const INDEX_VERSION = 1;
 
 /** 内置示例曲：随包发布，无需拷贝到文件系统 */
@@ -163,11 +170,34 @@ async function readCovers(): Promise<Record<string, string>> {
   }
 }
 
+async function readAudioMap(): Promise<Record<string, string>> {
+  const raw = await readText(AUDIO_PATH);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeAudioMap(map: Record<string, string>): Promise<void> {
+  await writeText(AUDIO_PATH, JSON.stringify(map));
+}
+
 export async function listLibrary(): Promise<LibraryEntry[]> {
-  const [imported, covers] = await Promise.all([readImportedIndex(), readCovers()]);
-  return [...getBuiltInEntries(), ...imported].map((entry) =>
-    covers[entry.id] ? { ...entry, coverUri: covers[entry.id] } : entry,
-  );
+  const [imported, covers, audio] = await Promise.all([
+    readImportedIndex(),
+    readCovers(),
+    readAudioMap(),
+  ]);
+  return [...getBuiltInEntries(), ...imported].map((entry) => {
+    const withCover = covers[entry.id] ? { ...entry, coverUri: covers[entry.id] } : entry;
+    const ref = audio[entry.id];
+    if (!ref) return withCover;
+    const uri = resolveAudioUri(ref);
+    return uri ? { ...withCover, audioUri: uri } : { ...withCover, audioLost: true };
+  });
 }
 
 /**
@@ -179,6 +209,30 @@ export async function setCoverUri(id: string, uri: string | null): Promise<void>
   if (uri) covers[id] = uri;
   else delete covers[id];
   await writeText(COVERS_PATH, JSON.stringify(covers));
+}
+
+/**
+ * 为某首曲目绑定伴奏：把选中的本地音频复制进沙盒，并记进 `audio.json`。
+ * 返回可播放 URI（Web 端为原始 URI）；替换旧伴奏时清掉上一个文件，不留孤儿。
+ */
+export async function bindAudio(id: string, pickedUri: string, name: string): Promise<string | undefined> {
+  const ref = await importLocalAudio(id, pickedUri, name);
+  const map = await readAudioMap();
+  const previous = map[id];
+  map[id] = ref;
+  await writeAudioMap(map);
+  if (previous && previous !== ref) await removeLocalAudio(previous);
+  return resolveAudioUri(ref);
+}
+
+/** 解除某首曲目的伴奏绑定并删除沙盒文件（删除曲目 / 手动解绑时调用）。 */
+export async function clearAudio(id: string): Promise<void> {
+  const map = await readAudioMap();
+  const ref = map[id];
+  if (!ref) return;
+  delete map[id];
+  await writeAudioMap(map);
+  await removeLocalAudio(ref);
 }
 
 // ── 读取乐谱 ────────────────────────────────────────────
@@ -260,6 +314,7 @@ export async function deleteEntry(id: string): Promise<void> {
   await remove(scorePath(target.fileName));
   scoreCache.delete(id);
   await setCoverUri(id, null);
+  await clearAudio(id);
   await writeImportedIndex(entries.filter((e) => e.id !== id));
 }
 

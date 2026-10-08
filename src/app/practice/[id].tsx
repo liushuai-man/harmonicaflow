@@ -11,7 +11,7 @@ import { keySignatureToTonicPc } from '../../core/pitch';
 import { buildTimeline, type TimelineInfo } from '../../player/timing';
 import { usePlayback } from '../../player/usePlayback';
 import { fetchOnlineCover, importLocalCover } from '../../store/coverCache';
-import { listLibrary, loadScore, setCoverUri, type LibraryEntry } from '../../store/library';
+import { bindAudio, listLibrary, loadScore, setCoverUri, type LibraryEntry } from '../../store/library';
 import { usePrefs } from '../../store/prefs';
 import { useTheme } from '../../theme/ThemeProvider';
 import { radius, spacing } from '../../theme/tokens';
@@ -37,7 +37,7 @@ export default function PracticeScreen() {
   const [result, setResult] = useState<ArrangeResult | null>(null);
   const [timeline, setTimeline] = useState<TimelineInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 伴奏仅本次会话有效（持久化与曲目绑定见 PLAN.md T4）
+  // 伴奏与曲目绑定、经 docStore 持久化（见 PLAN.md T4）
   const [audioUri, setAudioUri] = useState<string | null>(null);
 
   // 载入曲目（仅依赖 id）
@@ -58,6 +58,7 @@ export default function PracticeScreen() {
         if (cancelled) return;
         setEntry(found);
         setScore(loaded);
+        setAudioUri(found.audioUri ?? null);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -105,6 +106,7 @@ export default function PracticeScreen() {
   }, [entry]);
 
   const handlePickAudio = useCallback(async () => {
+    if (!entry) return;
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: 'audio/*',
@@ -112,11 +114,14 @@ export default function PracticeScreen() {
         multiple: false,
       });
       if (picked.canceled) return;
-      setAudioUri(picked.assets[0].uri);
+      const asset = picked.assets[0];
+      const uri = await bindAudio(entry.id, asset.uri, asset.name ?? 'audio');
+      setAudioUri(uri ?? null);
+      setEntry((prev) => (prev ? { ...prev, audioUri: uri, audioLost: false } : prev));
     } catch {
       // 选伴奏失败不阻塞跟吹
     }
-  }, []);
+  }, [entry]);
 
   useEffect(() => {
     if (!score) return;
@@ -202,6 +207,15 @@ export default function PracticeScreen() {
             有 {stats.total - stats.feasibleCount} 个音超出现有音域：
             {stats.infeasibleNotes.join('、')}
             （已用最近孔位占位，可更换口琴或校音阶表）
+          </Text>
+        </View>
+      ) : null}
+
+      {entry?.audioLost ? (
+        <View style={[styles.banner, { backgroundColor: colors.warningBg }]}>
+          <Icon name="alert" size={16} color={colors.warningText} />
+          <Text style={[styles.bannerText, { color: colors.warningText }]}>
+            伴奏文件已失效（可能被移动或删除），请重新选择伴奏
           </Text>
         </View>
       ) : null}
