@@ -6,6 +6,9 @@
 - 交付形态：安装到 Android 手机的独立 App（出包走 EAS 云端构建，**本地不需要装 Java/Android Studio**）
 - 详细设计：[docs/PRD.md](./docs/PRD.md)（需求）· [docs/TECH_DESIGN.md](./docs/TECH_DESIGN.md)（技术方案，**§11 为构建与部署方案**）· [docs/AI_SCORING.md](./docs/AI_SCORING.md)（录音评测方案，规划中）· [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，规划中）
 - 过程管理：[docs/PLAN.md](./docs/PLAN.md)（后续任务规划：做什么、什么顺序、产出什么）· [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)（验收标准：怎么算做完、怎么验、怎么记录）
+- UI 设计：[docs/UI_DESIGN.md](./docs/UI_DESIGN.md)（品牌一致性、底部孔位/吹吸信息、个性化边界与视觉交付）
+
+> 设计状态（2026-10-08）：当前交付主线是 Android 离线跟吹；电脑练习和博客独立展示模块属于扩展方向，尚无完整 Web 版。新视觉方向未定档，现有皮肤只是实现基线。功能“已实现”不等于真机“已验收”，以 PLAN / ACCEPTANCE 的记录为准。
 
 ---
 
@@ -293,7 +296,7 @@ git push origin main        # 自动跑 CI + 发布 Web 到 Pages
 - **输出模式取 `single`（SPA），不能用 `static`**：跟吹页是动态路由 `practice/[id]`，`id` 来自用户本地导入的曲目，构建期无法用 `generateStaticParams` 预生成 HTML。
 - **`experiments.baseUrl = "/harmonicaflow"`**：Pages 站点挂在「仓库名」子路径下，不配这个资源路径会 404（已实测产物为 `/harmonicaflow/_expo/...`）。
 - 工作流里做了两处 GitHub Pages 专属适配：`touch dist/.nojekyll`（否则 Jekyll 会忽略 `_expo/` 这类下划线目录）、`cp dist/index.html dist/404.html`（SPA 没有服务端 rewrite，靠 404 回退支持深链接）。
-- ⚠️ **Web 版不是完整功能**：跟吹页时间轴在浏览器里渲染不出来（视口高度恒为 0），Pages 上只是残缺 demo，效果以真机为准。
+- ⚠️ **Web 版不是完整功能**：跟吹页存在已有的零高度/渲染问题记录，尚未完成 Web 适配与验收；不是浏览器永久限制，未来电脑端单独开发。Android 效果以真机为准。
 
 ### 10.4 数据与后端
 
@@ -301,6 +304,6 @@ git push origin main        # 自动跑 CI + 发布 Web 到 Pages
 
 - 设置（主题 / 皮肤 / 主色 / 透明度 / 落块方向 / 视角 / 横向琴谱 / 口琴预设 / 音阶表）与导入的乐谱，统一经 `src/store/docStore.ts` 落盘；
 - 原生走 `expo-file-system` 应用沙盒，Web 走浏览器 `localStorage`；封面也走同一入口（仅"在线随机封面"开关打开时联网）。
-  **注意**：封面字节缓存**只在原生端**发生（Web 端受 `localStorage` 5MB 配额限制，只记远程 URL 不缓存字节）。
+  **注意**：封面字节缓存**只在原生端**发生（Web 端本地存储容量有限，只记 URL 不缓存图片字节）。
 - 因此：**卸载 App 或清除浏览器站点数据会丢失数据**；且 Web 与原生各存各的，互不同步。
   后续若要跨端同步，`docStore.ts` 是唯一改造入口。

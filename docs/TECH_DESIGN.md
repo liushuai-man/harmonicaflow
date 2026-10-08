@@ -1,8 +1,10 @@
 # 口琴跟吹助手 HarmonicaFlow — 技术方案
 
-- 版本：v0.5.0
-- 日期：2026-10-06
+- 版本：v0.6.0
+- 日期：2026-10-08
 - 关联文档：[PRD.md](./PRD.md) · [ARCHITECTURE.md](./ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，**远期规划**）
+
+> v0.6.0 文档修订：区分当前实现与目标契约，修正缓存、存储扩展和线程边界的过度承诺；UI 原则见 [UI_DESIGN.md](./UI_DESIGN.md)。本次不改代码或默认数值。以下版本摘要仅为历史，当前正文优先。
 
 > v0.5.0 变更摘要（**T3：音频时钟接管时序**，不改消费侧）：
 > ① §2 新增运行时依赖 `expo-audio` + 必需 peer `expo-asset`（本项目首次新增运行时依赖，均为 Expo 官方模块、Expo Go 内置）；
@@ -60,12 +62,12 @@
 
 关键边界：`core/` 不 import 任何 React / RN / Expo 模块，因此可以脱离设备用 Node 脚本验证解析、编配与简谱转换的正确性。
 
-**扩展点（本版不实现，只保证接缝干净，见 §12）**——三处边界让后期加后端 / 播放器 / Agent 时不改动 UI：
-1. `store/docStore.ts` 是**唯一**读写入口，换后端 / 云同步只改这一层；
-2. `player/` 的时间推进走 `TimeSource` 接口（当前 = 本地计时器），换音频播放器只需替换该实现；
-3. 未来新增 `services/`（backend / ai）目录放外部能力，页面层只调接口，不直接用 `fetch`。
+**边界说明**：上图是职责概览，不表示各层必须串联依赖，实际依赖方向见 ARCHITECTURE §3。
+1. `store/docStore.ts` 是唯一**本地**读写入口；未来同步由独立编排层处理，不能隐式塞入每次文件读写。
+2. `player/timing.ts` 是纯函数；`usePlayback.ts` 与 `timeSource.ts` 当前已依赖 React/Reanimated/Expo 音频，是平台适配层，不能称为只依赖 core 的纯层。
+3. 未来 `services/` 承接外部能力，页面不直接 `fetch`；现有在线封面是 `coverCache.ts` 的可选联网路径。接口在真实需求出现时抽取，不创建空实现。
 
-> 后续演进：`core/` `store/` 将上提为 monorepo 的 `packages/core` `packages/storage`，供 PC 端（Electron）复用，目录划分与多端方案见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。**本文描述的分层内部设计不变**。
+> 后续演进：先在当前目录保持边界。第二个独立消费者确需共享包时才抽取纯核心与平台接口；同仓库 Web 适配或博客链接不自动触发 monorepo，也不预先锁定 Electron。见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。
 
 数据流：
 
@@ -79,11 +81,13 @@
 
 ---
 
-## 2. 依赖清单（运行时共 9 项）
+## 2. 关键依赖清单
+
+下表列关键能力依赖，不是完整数量统计；准确清单和版本以 `package.json` / lockfile 为准。新增运行时依赖须先评估并批准，不将“轻量”解释为必须自研全部基础能力。
 
 | 依赖 | 版本策略 | 用途 |
 |---|---|---|
-| `expo` | SDK 最新稳定 | 框架 |
+| `expo` | 项目锁定 SDK 57，升级单独审批 | 框架 |
 | `expo-router` | 随 SDK | 路由 |
 | `react-native-reanimated` | Expo 内置 | UI 线程动画（时间轴平移） |
 | `react-native-worklets` | 随 reanimated 4（0.10.x） | reanimated 4 的必需 peer 依赖，提供 worklet 运行时与 babel 插件 |
@@ -253,7 +257,15 @@ parse(content: string | Uint8Array, filename: string): Score
 | `abc.ts` | 实现常用子集：头部 `X/T/M/L/K/Q`；音名 `CDEFGAB` + 八度 `'` `,`；临时记号 `^ _ =`；时值倍数 `2`、`/2`、`3/2`；小节线、连音 `-`、休止 `z`。`L:` 定义默认时值，`Q:` 或默认 120 取速度 |
 | `musicxml.ts` | `fast-xml-parser` 解析；遍历 `score-partwise/part/measure/note`：取 `pitch(step,alter,octave)`、`duration`、`rest`、`chord`、`tie`；用 `divisions` 把 duration 折算为 tick（`ppq` 固定为 480）；`backup`/`forward` 处理多声部时间轴；`<sound tempo>` 或默认 120 取速度。`.mxl` 先用 `fflate` 解压出 `META-INF/container.xml` 指向的根 XML |
 
-> 只取**单一声部**（melody）：默认取第一个 `part`；同一 `start` 上出现和弦时，保留最高音（口琴单音吹奏），其余丢弃并在解析报告中计数。
+> **现状与目标分开**：当前 MusicXML 默认取第一个 `part`；同一 part 内多 voice 的旋律选择尚未形成可靠契约，和弦最高音分支也有游标比较问题。当前返回 `Score`，没有解析诊断报告，不能声称已统计所有丢弃内容。
+
+### 5.1 语义正确性与诊断（待实现，PLAN T0）
+
+- 解析成功不等于语义正确。先修 ABC 调号及 Q 节拍单位、MusicXML 和弦/多声部，再建立“解析 → 单旋律归一化 → 编配”的纯函数边界；首个 part 只是默认选择，不能等同主旋律识别。
+- 诊断应区分完全支持、可用但简化、无法练习；记录被忽略的声部/反复/变速等信息。不支持且影响音高或时序的内容不能静默假装正确。
+- 可恢复的内容保留并提示；无法得到可靠音符时明确失败，保留其他曲目和原文件，不编造音符。“降级”不表示所有输入都必须成功，也不与 ACCEPTANCE 的 L1/L2/L3 验证级别混用。
+- 当前模型只有单一 BPM/拍号/调号。先声明匀速子集与限制；一般变速谱支持需另设计按 tick 的 tempo map 与分段时间换算，不靠音频校时补偿谱面语义错误。
+- 新增诊断/旋律契约前同步更新 §3 模型与测试样本，不在呈现组件中补解析规则。
 
 ---
 
@@ -382,6 +394,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 
 ### 7.6 音阶标注（判定线一侧）
 
+底部演奏面板以孔号和吹/吸为主要信息，简谱为辅助；横向模式沿判定线对应一侧放置。布局与动作强调的目标见 UI_DESIGN §2–§4，不能仅以简谱两行已显示就判定动作可读性通过。
+
 - `core/pitch.ts` 新增 `midiToJianpu(midi, tonicPc)`：返回音级 `1-7`、变音记号（非音阶级统一用 `#` 记法，如 C 调 C#4 = `#1`）、相对基准八度的偏移；`formatJianpu` 把偏移渲染为小圆点（高八度后置 `1·`、低八度前置 `·1`）。
 - 主音由 `keySignatureToTonicPc(score.keySignature)` 解析（缺省 C）；基准八度取中央 C 附近的主音。
 - 按孔列显示该孔 **吹 / 吸** 两个简谱度数并标出孔号，供用户对照实体琴（半音阶的推键音同孔同列，不重复标注）。位置随方向：`down` 在判定线**下方**（底部栏），`right` 在判定线**右侧**（右侧栏，孔列自上而下）。
@@ -401,6 +415,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 
 ### 7.8 UI 设计系统（`theme/tokens.ts` + `ui/components/`）
 
+设计原则以 [UI_DESIGN.md](./UI_DESIGN.md) 为准。下列组件是当前实现；字体层级、动作级底栏强调、减少装饰动效和完整状态覆盖属于 T1 待验证/待完善项目，不因写入本文视为已经实现。皮肤扩展只改视觉令牌，不改编配、时间换算或孔位映射；新增偏好须说明价值与组合验收，不自动添加设置项。
+
 参照 shadcn/ui 的「开放代码 + 可组合 + 好看默认值」思路，把散落在页面里的内联样式收敛成一层自有组件，
 **不引入任何 UI 库或图标字体**——图标用已有的 `react-native-svg` 手绘，令牌只写尺寸与投影：
 
@@ -417,10 +433,12 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 
 ### 7.9 命中高亮（hover 联动）
 
+这里“命中”仅指音块到点提示，与指针 hover、麦克风吹奏正确性判定是三件事。底部演奏面板是孔位/吹吸信息锚点；当前代码主要按 `hitHole` 强调整孔，不能当成动作级吹/吸/推键强调已完成的证据。完善目标与验收见 UI_DESIGN §3–§4。
+
 - **目标**：音块压线瞬间，**音块 + 判定线该列段 + 该孔音阶标注**三者同步高亮一下（约 `HIT_HIGHLIGHT_MS = 200ms`，随后自然回落），给"该吹了"一个连贯、即时的提示。
 - **触发**：与触碰特效共用同一套「跨接触时刻」检测（`useAnimatedReaction` 监听 `positionMs` 越过 `hitTimes`），避免两套计时造成抖动。
-- **驱动（关键）**：高亮**走共享值 + `useAnimatedStyle`（UI 线程）**，而**不是** `setState`——每个孔的"高亮强度"由一个 `SharedValue` 承载，压线时 `withTiming(1, { duration })` 再 `withTiming(0)` 回落；音块填充不透明度 / 描边宽、判定线段线宽、标注文字色都从它派生。全程不触发 React 重渲染，因此**不掉帧**。
-- **只改属性不加节点**：高亮只改动已有 SVG 节点的属性（不透明度 / 线宽 / 颜色），不新增节点、不做逐块重建，与"单动画节点"的骨架兼容。
+- **驱动（当前实现与约束）**：连续滚动与到点高亮采用共享值及动画样式，不在逐帧路径上 `setState`。当前还有低频可视窗口更新和离散特效实例的 React 状态管理，不能声称整个时间轴完全没有 React 重渲染；这些路径需控制更新量并真机测量。
+- **节点预算**：高亮尽量复用节点，特效可有界创建/回收；“只有一个动画节点”仅描述整体平移的骨架，不是整个页面的节点数承诺。UI 线程实现是设计手段，不能替代帧率与可读性验收。
 - **指针 hover（PC / Web）**：控件层（`Button / Row / SegmentedControl / Slider`）在有指针时提供 `hover` 与 `press` 两态过渡反馈；过渡时长统一取自 §7.11 的 `INTERACTION_MS`，保证各控件一致、自然。
 
 ### 7.10 音乐封面（`ui/components/SongCover.tsx`）
@@ -428,8 +446,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 - **来源优先级（本地优先）**：① 用户为曲目设置的**本地封面** → ② **内置封面**（随包资源）→ ③ **在线随机图**（仅在开关打开时）→ ④ 兜底：曲名首字 + 皮肤渐变的**占位图**。
 - **在线随机图是可选开关（默认关）**：设置项 `onlineCover: boolean`。开启后首次为某曲拉取一张随机图；**缓存策略分平台**（关键，见下）；拉取失败或离线自动回退到 ② / ④。**默认不联网**，符合纯本地原则。
 - **缓存策略分平台（修正）**：
-  - **原生端**：把字节缓存到 `Paths.document + 'covers/{id}.{ext}'`，之后离线直接读缓存（`expo-file-system` 无配额压力）。
-  - **Web 端**：**只把远程 URL 存进 `library.json` 的 `coverUri`，不缓存字节**——Web 端 `docStore` 落在 `localStorage`，而封面是二进制、转 base64 再写入会迅速撑爆 **5MB 配额**，且写入失败是静默的。远程 URL 由浏览器自身的 HTTP 缓存负责，离线时自然回退到 ② / ④。
+  - **原生端**：把字节缓存到持久目录，离线读缓存；仍需考虑设备空间与清理，不能假定容量无限。
+  - **Web 端**：只把 URL 映射存进 covers.json，不缓存图片字节；Web 存储容量有限，写入可失败，不能按固定配额或静默成功设计。浏览器缓存不保证离线命中，加载失败回落到占位封面。
   - 判断依据由 `docStore` 暴露的 `supportsBinaryCache` 常量给出，上层不写平台分支。
 - **读写收口**：封面字节读写走 `store/docStore.ts`（复用已有 `readBytes` / `writeBytes`，仅原生端走字节路径）；在线取图逻辑单独放在 `store/coverCache.ts`（`fetch` → 原生端写入 `docStore` / Web 端只记 URL → 返回可用 URI），组件只拿 URI，不直接用 `fetch` / `File`。
 - **展示**：曲库列表项与跟吹页顶部各一处，圆角 + 细描边，随皮肤取色。
@@ -452,7 +470,7 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 
 ## 8. 持久化（`store/library.ts`）
 
-用户偏好：`prefs.json`
+用户偏好：`prefs.json`（字段是当前实现；尚未具备完整版本化 schema 与恢复机制）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -468,14 +486,15 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 | `onlineCover` | `boolean` | 是否允许在线随机封面，缺省 `false` |
 | `layoutOverrides` | `Record<string, Hole[]>` | 音阶表校对覆盖，按 layoutId 存放 |
 
-- 旧字段 `orientation` 已移除；旧字段 `perspective`（枚举）**升级为 `viewAngle`（数值）**，读取时把旧枚举映射为角度（`off→0` / `weak→22` / `strong→34`）并写回新字段；读取时忽略未知字段，缺失字段回落到默认值（向后兼容旧 `prefs.json`）。
+- 旧字段 `orientation` 已移除；旧字段 `perspective`（枚举）**升级为 `viewAngle`（数值）**，读取时把旧枚举映射为角度（`off→0` / `weak→22` / `strong→34`）新字段在下一次 savePrefs 时写回；读取时忽略未知字段，缺失字段回落到默认值（向后兼容旧 `prefs.json`）。
 - 为避免设置页与主题层互相覆盖，新增 `store/prefs.tsx` 的 `PrefsProvider` / `usePrefs()`，写操作一律走 `updatePrefs(patch)`（读-合并-写），主题与设置页共用同一份状态。
 
-- 曲库索引：`Paths.document + 'library.json'`，存 `LibraryEntry[] = { id, title, source, origin, fileName, noteCount, importedAt, coverUri? }`（`coverUri` = 用户本地封面 / 原生端已缓存的在线封面路径 / Web 端的远程 URL）。`id` 已由内容哈希生成（`s<md5>`），**即 `contentHash`**，无需另存字段。
+- 曲库索引：`Paths.document + 'library.json'`，当前写入 { version, entries } 包装，entries 为导入曲目元数据；封面映射另存 covers.json。ID 使用原生 MD5 或回退字节哈希，跨平台不能假定哈希算法/ID 一致；未来同步需统一内容身份契约。
 - 导入的原始文件复制到 `Paths.document + 'scores/{id}.{ext}'` 保存，重复导入以 `File.md5` 内容哈希去重（哈希命中则不重复写盘）。
-- 封面缓存：**仅原生端**写 `Paths.document + 'covers/{id}.{ext}'`（且仅当"在线随机封面"开关打开时才产生）；**Web 端只在 `library.json` 记远程 URL**，见 §7.10。
+- 封面映射实际保存在 `covers.json`，兼容内置与导入曲目；原生本地导入及可选在线封面均可产生缓存字节，Web 不缓存图片字节。`LibraryEntry.coverUri` 是读取映射后合并的字段。
 - 内置示例曲随包发布（`assets/songs/*.json`），以 `builtin:` 前缀虚拟成条目，**不复制到文件系统**。
-- **派生数据缓存（v0.4.0 新增）**：`parse → arrange` 的结果（`Score`、`TabNote[]`、`arrange` 统计）**按 `id`（= contentHash）缓存**，首页列表统计与跟吹页共用同一份缓存，避免同一首曲在两页各算一遍。缓存只在内存（`Map<id, …>`），进程退出即失效——不做持久化，因为重算成本低、持久化反而要处理失效与版本迁移。`loadScore` 已有 `scoreCache`，v0.4.0 把 `arrange` 结果一并并入该缓存层。
+- **缓存现状**：`loadScore` 只有按曲目 ID 的 `Score` 内存缓存；首页与跟吹页仍各自计算 arrange。共享编配缓存尚未实现；若性能证据需要，缓存键必须包含谱面身份、音阶表实际内容（含 overrides）、编配参数与算法版本，不能只用曲目 ID。删除、改谱或改音阶时有明确失效策略。
+- **可靠性目标（待实施）**：偏好及索引须校验/迁移；连续写入顺序、失败恢复与损坏数据提示要有测试。当前文件写入不等于原子事务，不把解析失败回空数组当作完整恢复方案。持久化音频须通过 docStore 复制并管理生命周期。
 - **`store/docStore.ts` 是唯一存储边界**（`readText / writeText / readBytes / writeBytes` + 路径解析 + `supportsBinaryCache`），上层业务与组件不直接触碰 `expo-file-system` / `localStorage`；Web 端用 `localStorage`、原生端用应用沙盒，同一组 API 内部按平台分派。
 - 全部走 expo-file-system 新 API（`File` / `Directory` / `Paths`），不引入 AsyncStorage。
 
@@ -501,6 +520,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 6. **出包验证**：`npx eas-cli@latest build -p android --profile preview` 云端出 APK，安装到真机确认可运行（本地无需 JDK）。完整方案见 §11。
 
 ### 9.1 视觉状态验证矩阵（v0.4.0 新增）
+
+与 UI_DESIGN §6、ACCEPTANCE T1-7～10 联合执行。每条结果标记设备、尺寸、系统、构建版本、皮肤及字体缩放；单一 V9 组合不能证明所有组合安全。可读性/动作误辨是阻塞项，风格偏好由用户选择。新验收项目前未验证。
 
 视觉项是**多个正交维度**（方向 × 视角 × 皮肤 × 深浅 × 透明度 × 琴谱 × 封面），全组合是 3×N×2×3×3×3×2，穷举不现实。因此**不做全组合**，只验证「**每个维度单独切换不破**」+「**一组极端组合不破**」，共 10 项：
 
@@ -542,7 +563,7 @@ eas.json                  EAS 构建 profile（development / preview / productio
 docs/                     PRD.md · TECH_DESIGN.md · ARCHITECTURE.md · AI_SCORING.md
 ```
 
-> **目录到 monorepo 的映射**（推迟实施，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §11）：`core/` → `packages/core`、`store/docStore.ts` → `packages/storage`、`theme/` 的纯 TS 与 `core/visual/` → `packages/shared`。**`ui/*.tsx` 不上提**（PC 端 UI 不复用 RN 组件）。抽包由 P3 桌面端触发，当前不做。
+> **目录演进**：第二个独立消费者确需共享包时才按职责抽取，core/visual 保持单一来源；RN 组件按 Web 适配效果复用，不提前禁止。存储接口与平台实现分别处理，不机械平移整层。见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3.3。
 
 ---
 
@@ -637,15 +658,15 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 | `deploy-web.yml` | push 到主分支 | 构建 Web 版并部署到 GitHub Pages |
 
 - 一次性配置：GitHub Secrets 加 **`EXPO_TOKEN`**（名称只能含字母/数字/下划线，且与工作流里的 `secrets.EXPO_TOKEN` 完全一致）、本地跑一次 `eas-cli login` + `eas init` 绑定 EAS 项目、Pages 的 Source 选 **GitHub Actions**。
-- Web 版受 `localStorage` 配额与浏览器视口高度限制，跟吹页时间轴在浏览器里渲染不完整（见 [README §10.3](../README.md)）——**Pages 上只是残缺 demo，效果以真机为准**。
+- Web 当前有存储容量与布局适配问题记录，尚未作为完整产品验收；零高度不是永久浏览器限制。未来 Web 单独验证，不能替代 Android 真机结果（见 [README](../README.md)）。
 
 ### 11.8 发布检查清单
 
-1. `npx tsc --noEmit` / `npm run verify` / `npx expo-doctor` 全绿（见 §9）。
+1. `npx tsc --noEmit` / `npm run lint` / `npm run verify` / `npx expo-doctor` 全绿（见 §9）。
 2. `app.json` 的 `version` 与 `android.versionCode` 已递增。
-3. Expo Go 真机联调通过（§9.3 与 §9.1 验证矩阵），确认**落块（`down` / `right` / `auto`）、视角（垂直↔斜视）、皮肤 / 透明度、命中高亮、横向琴谱、封面（含离线回退）、触碰特效、主题切换**均正常。
+3. Expo Go 真机联调通过（§9 的真机步骤与 §9.1 验证矩阵），确认**落块（`down` / `right` / `auto`）、视角（垂直↔斜视）、皮肤 / 透明度、命中高亮、横向琴谱、封面（含离线回退）、触碰特效、主题切换**均正常。
 4. 出 `preview` APK，装到目标机型复验（Expo Go 与独立包的原生模块行为可能不同）。
-5. 出 `production` AAB；上架执行 `npx eas-cli@latest submit -p android --profile production`（需 Google Play 服务账号 JSON）。
+5. 仅在决定商店发布时出 `production` AAB 并按商店流程提交；个人使用的 preview APK 交付不要求上架。
 6. 若启用了 OTA，确认 `channel` 与 `runtimeVersion` 匹配后再推更新。
 
 ---
@@ -657,21 +678,21 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 ### 12.1 存储接缝（后端 / 云同步）
 
 - `store/docStore.ts` 是**唯一**读写入口，`library.ts` / `prefs.tsx` / `coverCache.ts` 都经它读写。
-- 后期加后端 / 云同步时，只需在 `docStore.ts` 内部增加"远端同步"实现（读：本地优先 + 远端合并；写：本地落盘 + 后台上传），**页面与组件零改动**。
-- 若走 monorepo，`core/` `store/` 上提为 `packages/core` `packages/storage` 供 PC 端复用，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。
+- 后期同步另设编排层，复用本地仓储与独立远端适配器，处理身份、队列、版本、冲突与删除。docStore 保持本地 I/O；页面按需展示状态，不承诺零改动。
+- 只有第二个独立消费者需要共享包时才拆接口与平台实现，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3。
 
 ### 12.2 时序接缝（音乐播放器 / 导入本地音乐）
 
 - `usePlayback` 用**本地计时器**（Reanimated `withTiming`）驱动 `positionMs`，这是**默认且唯一**的时钟（无伴奏时）。
 - **T3 已落地**：接入 `expo-audio` 后，`player/timeSource.ts` 提供 `createAudioClock(player, leadInMs)`——把音频进度换算回时间轴坐标，并收口 `play/pause/seek/变速`；`usePlayback` 通过可选参数 `audioUri` 在「本地时钟」与「音频时钟」之间切换（见 §7.2）。时间轴坐标约定为 **音频 0s ↔ `LEAD_IN_MS`**。
-  - 说明：本地计时器**仍保留 `withTiming` 形态**（UI 线程插值），未改造成 pull 式的 `TimeSource` 实现——因为那样会把无伴奏（当前默认路径）的平滑性降级为轮询。音频时钟以「周期校准」的方式成为权威：既平滑又不漂移。
+  - 说明：本地计时器**仍保留 `withTiming` 形态**（UI 线程插值），未改造成 pull 式的 `TimeSource` 实现——因为那样会把无伴奏（当前默认路径）的平滑性降级为轮询。音频时钟以「周期校准」的方式成为权威：目标是兼顾平滑与同步，仍需真机验证。
 - **⚠️ 接缝不是"零成本"（v0.4.0 修正，v0.5.0 落地）**：`positionMs` 是 **UI 线程上的 Reanimated 共享值**，而音频播放器的进度来自**原生侧**，两者**不在同一线程、也不能直接赋值**，必须补一段**桥接**。T3 采用的方案是**周期校准**（而非逐帧写回）：
-  - 本地 `withTiming` 继续在 UI 线程插值（保证 60fps 平滑），JS 侧每 300ms 读一次 `player.currentTime`，偏差超 80ms 才重锚 `positionMs`。
-  - 之所以不逐帧写回：`withTiming` 已在 UI 线程平滑推进，逐帧写反而会引入 JS 定时器的抖动，且每帧跨线程写共享值更耗电；周期校准同时满足「不抖动」与「不漂移」。
+  - 本地 `withTiming` 继续在 UI 线程插值（目标为平滑滚动，帧率需实测），JS 侧每 300ms 读一次 `player.currentTime`，偏差超 80ms 才重锚 `positionMs`。
+  - 之所以不逐帧写回：`withTiming` 已在 UI 线程平滑推进，逐帧写反而会引入 JS 定时器的抖动，且每帧跨线程写共享值更耗电；周期校准是当前实现选择，不能据此宣称已满足「不抖动」与「不漂移」。
   - 结论：**消费侧（时间轴 / 特效 / 命中高亮）确实不用改**，因为它们只读 `positionMs`；改的是**供给侧的桥接**——这正是"换音频源"的真实工作量。
-- "导入本地音乐"= 给曲目附加一个本地音频 `uri`（存 `library.json`），UI 增加一个"选择音频"入口。
+- 持久伴奏需通过 docStore 复制到持久目录、记录绑定及资源所有权，并处理替换/删除/失败恢复，不能只保存临时 URI。音频起点与谱面起点、BPM 必须匹配；自动内容对齐未实现，周期校时仅处理时钟漂移。
 
 ### 12.3 外部能力接缝（Agent / AI 点评）
 
-- 页面层**不直接 `fetch`**；未来新增 `src/services/`（`backend.ts` / `ai.ts`）承载外部调用，接口签名先定、实现可先空跑。
+- 页面层**不直接 `fetch`**；真实外部能力任务启动后新增必要 service，先定义错误、取消、超时与降级契约，不提前创建空跑实现。
 - AI 点评方案（录音 → 音高检测 → 评分 → LLM 点评）与统一提示词见 [AI_SCORING.md](./AI_SCORING.md)；**AI 的 API key 由用户自行配置**，与后端解耦。

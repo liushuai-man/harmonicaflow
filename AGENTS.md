@@ -61,10 +61,12 @@ Expo 每个 SDK 版本都会带破坏性变更，你记忆里的 API 很可能�
 
 **总验收（唯一标准）**：
 
-> 打开 App → 导入一份乐谱 → **不做任何设置** → 音块平滑流入判定线、压线时刻与该吹的时刻一致、孔位与吹吸正确 → 全程可用、默认离线。**全程零配置。**
+> 打开 App → 导入支持范围内的乐谱 → **无需逐曲编配或调整视觉** → 音块平滑流入判定线、压线时刻与该吹的时刻一致、底部孔位与吹吸正确 → 全程可用、默认离线。默认琴型必须明确，其他实体琴需匹配预设或校对，不能假定系统能从乐谱识别用户的琴。
 
 **四条门禁**（细则见 [ACCEPTANCE.md](./docs/ACCEPTANCE.md) §2）：
 `npx tsc --noEmit` · `npm run lint` · `npm run verify` · `npx expo-doctor` —— **全绿才算完成**。
+
+纯 Markdown 变更按 ACCEPTANCE §2 检查链接、引用、差异与一致性，不据此宣称功能验收通过。视觉原则以 [UI_DESIGN.md](./docs/UI_DESIGN.md) 为准：默认完整、偏好渐进开放，保留瀑布与底部孔位/吹吸锚点；具体风格及默认参数仍需用户定档。
 
 **三条减负铁律**（每次做取舍时按此排序）：
 
@@ -88,7 +90,7 @@ Expo / React Native 的**单机、单用户** Android 跟吹应用，**纯本地
 | 文件选择 | expo-document-picker |
 | 出包 | **EAS 云端构建**（本机不装 Java / Android Studio） |
 | 发布 | `development`（dev client）/ `preview`（APK，真机直装）/ `production`（AAB 上架） |
-| 平台 | **仅 Android**；iOS 不在范围；Web 版仅作展示（跟吹页在浏览器中渲染不出，见「边界规则」） |
+| 平台 | 当前 Android 优先；Web 尚未开发/验收为完整产品，未来电脑使用先验证 Web；博客为独立展示模块，桌面壳未定。iOS 不在范围 |
 
 ## 模块与分层
 
@@ -97,7 +99,7 @@ Expo / React Native 的**单机、单用户** Android 跟吹应用，**纯本地
 | 层 | 目录 | 约束 |
 |---|---|---|
 | 算法层 | `src/core/` | **零 React / RN / Expo 依赖**（`npm run verify` 有边界断言）。可被 Node 脚本直接验证，可被多端零改动复用 |
-| 时序层 | `src/player/` | 只依赖 `core` |
+| 时序层 | `src/player/` | `timing.ts` 为纯函数依赖 core；hook/音频时钟是 React/Reanimated/Expo 平台适配，不反向进入 core |
 | 存储层 | `src/store/` | 可依赖 `core`；**数据读写只能走 `docStore.ts`** |
 | 主题层 | `src/theme/` | 可依赖 `core` |
 | 呈现层 | `src/ui/` · `src/app/` | 最上层，可依赖以上所有 |
@@ -171,10 +173,11 @@ npx eas-cli@latest build -p android --profile preview   # 云端出 APK
 | 文件 | 内容 | 何时更新 |
 |---|---|---|
 | [PRD.md](./docs/PRD.md) | 产品定位 / 需求 / 界面 / 成功标准 / 后期规划 | 产品行为、需求变化 |
+| [UI_DESIGN.md](./docs/UI_DESIGN.md) | 品牌一致性 / 底部信息锚点 / 个性化与视觉交付约束 | 视觉原则、信息层级或组件语义变化 |
 | [TECH_DESIGN.md](./docs/TECH_DESIGN.md) | 分层 / 数据模型 / 算法 / 时序渲染 / 构建部署 / 扩展点 | 技术契约变化 |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 后端 / PC 端 / AI 层的**远期**方案与约束 | 远期规划变化（**§5–§9 在 P2 之后才实施**） |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 当前边界与跨端 / 博客 / 后端 / AI 的条件性演进 | 对应需求启动时实施，不让本地评分或博客展示依赖后端阶段 |
 | [AI_SCORING.md](./docs/AI_SCORING.md) | 录音评测方案（音高检测 / 评分 / LLM 点评） | 评测方案变化 |
-| [PLAN.md](./docs/PLAN.md) | 后续任务规划：T1–T7、顺序、产出物、明确不做 | 范围 / 排期变化 |
+| [PLAN.md](./docs/PLAN.md) | 后续任务规划：T0–T7、顺序、产出物、明确不做 | 范围 / 排期变化 |
 | [ACCEPTANCE.md](./docs/ACCEPTANCE.md) | 验收标准：三级验证、逐任务验收表、回归清单 | 验收标准变化 |
 
 常用章节定位：`§2` 依赖清单 · `§3` 数据模型 · `§4` 音阶预设 · `§5` 解析器 · `§6` 编配 · `§7` 时序与渲染（`§7.1`–`§7.11`）· `§8` 持久化 · `§9` 验证方式（`§9.1` 视觉矩阵 V1–V10）· `§10` 目录结构 · `§11` 构建与部署（`§11.8` 发布检查清单）· `§12` 扩展点。
@@ -203,9 +206,9 @@ npx eas-cli@latest build -p android --profile preview   # 云端出 APK
 - **手改 `android/` 或 `ios/`** —— 由 CNG 生成且不入库；原生行为只能配 `app.json` 与 config plugin
 - **本地打 Android 包**（本机无 Java）；一律走 EAS 云端构建
 - **绕过 `docStore.ts` 直读写 `localStorage` / `FileSystem`**
-- **在动画路径上 `setState`** —— 命中高亮 / hover 联动必须走 SharedValue + `useAnimatedStyle`（UI 线程）
+- **在逐帧滚动/动作高亮路径上 `setState`** —— 用 SharedValue + 动画样式；低频剔除与离散特效状态更新须有界并实测，不能声称全组件零重渲染
 - **把视觉默认常量散落在组件里** —— 一律收敛到 `core/visual/params.ts`
-- **在 webview / 浏览器里宣称已完成端到端验证** —— 容器视口高度恒为 0，跟吹页在 Web 上渲染不出，**必须真机验证**（Expo Go 或独立 APK）
+- **用 Web 验收替代 Android 真机验收** —— 当前 Web 存在跟吹适配问题，不能当成永久平台限制；未来 Web 单独验收，Android 仍需兼容版本的 Expo Go / 开发构建 / 独立 APK 真机验证
 - 引第三方 UI 库 / 图标库 / 渐变库（自绘或复用 `react-native-svg`）
 - 引入后端 / 云端服务（当前纯本地，生产环境零后端依赖）
 - 把用户乐谱内容**默认**发往远端（默认全离线）
@@ -216,7 +219,7 @@ npx eas-cli@latest build -p android --profile preview   # 云端出 APK
 
 - **改跟吹渲染 / 时序**：TECH_DESIGN §7.3 时间轴渲染 + §7.4 视角算法 + `core/visual/params.ts`（音块用**全曲绝对坐标**，锚点只用于剔除，否则滚动会跳）
 - **改视觉 / 皮肤 / 主题**：§7.7 主题系统 + §7.8 UI 设计系统 + §7.11 集中式视觉参数模块，改完跑 §9.1 的「受影响维度 + V9 + V10」
-- **改解析器 / 加格式**：§5 解析器设计（失败要**降级回 L1 而不是报错**）
+- **改解析器 / 加格式**：§5 解析器设计（可恢复内容保留并提示，不可解析时明确失败且不影响其他曲目；不生成伪谱，不把降级与验收 L1 混用）
 - **改编配**：§6 自动编配算法 + §4 音阶预设（**24 孔排列因品牌而异，只能作为可编辑数据存在，禁止硬编码**）
 - **改持久化**：§8 持久化 + §12.1 存储接缝，改 `Prefs` 字段**必须写迁移逻辑**
 - **改接口 / 扩展点**：§12 扩展点（§12.2 时序接缝 / §12.3 外部能力接缝）
@@ -233,8 +236,8 @@ npx eas-cli@latest build -p android --profile preview   # 云端出 APK
 | 滚动不跳动 | 音块用全曲绝对坐标，`anchorMs` 只用于剔除可视集合 | TECH_DESIGN §7.3 |
 | 动画不 `setState` | 命中高亮 / hover 联动走 SharedValue + `useAnimatedStyle` | TECH_DESIGN §7.9 |
 | 存储单一入口 | 数据读写只能走 `store/docStore.ts` | TECH_DESIGN §8 |
-| 自由可定义 | 落块方向 / 视角 / 皮肤 / 透明度 / 琴谱 / 封面全部可配置，**每项都带一套顺手默认值** | PRD §6.4 |
-| 解析降级不阻断 | 解析失败回退 L1，不报错、不影响其余文件 | TECH_DESIGN §5 |
+| 个性化有边界 | 已有偏好保留、默认完整；新增项需有用户价值与组合验收，不能破坏动作语义和可读性 | PRD §6.4 / UI_DESIGN |
+| 解析诊断不伪造 | 部分支持明确提示，失败保留其他曲目可用，不以伪谱掩盖错误 | TECH_DESIGN §5 |
 | 断网可用 | 默认全离线；仅「在线随机封面」开启时才联网 | PRD §8 |
 | 音阶表可编辑 | 排列只作为数据存在，算法里**没有任何硬编码排列** | TECH_DESIGN §4 |
 | 可复现 | 同一份谱面 + 同一份音阶表 → 编配结果确定、列表排序确定 | TECH_DESIGN §6 |
