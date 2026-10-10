@@ -8,9 +8,9 @@ import { chromatic12C } from './chromatic12C';
 export { tremolo24C, single24C, diatonic10C, chromatic12C };
 
 /** 内置预设，顺序即设置页展示顺序 */
-export const LAYOUTS: HarmonicaLayout[] = [tremolo24C, single24C, diatonic10C, chromatic12C];
+export const LAYOUTS: HarmonicaLayout[] = [single24C, tremolo24C, diatonic10C, chromatic12C];
 
-export const DEFAULT_LAYOUT_ID = tremolo24C.id;
+export const DEFAULT_LAYOUT_ID = single24C.id;
 
 /** 调号可选项（口琴常见调），供设置页选择 */
 export const KEY_OPTIONS = [
@@ -23,7 +23,7 @@ export const KEY_OPTIONS = [
  * `keys` 同步已保存的调号元数据；孔位已在设置保存时移调，此处不重复移调。
  */
 export function getLayout(id: string, overrides?: Record<string, Hole[]>, keys?: Record<string, string>): HarmonicaLayout {
-  const base = LAYOUTS.find((l) => l.id === id) ?? tremolo24C;
+  const base = LAYOUTS.find((l) => l.id === id) ?? single24C;
   const holes = overrides?.[base.id];
   const key = KEY_OPTIONS.find((value) => value === keys?.[base.id]) ?? base.key;
   const effectiveHoles = holes && holes.length > 0 ? holes : base.holes;

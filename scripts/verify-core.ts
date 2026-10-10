@@ -229,6 +229,13 @@ function verifyLayouts(): void {
   console.log('\n### 口琴预设与调号移调自检');
   check('单音 24 孔共 24 孔', single24C.holes.length === 24, `${single24C.holes.length}`);
   check('单音 24 孔默认 C 调', single24C.key === 'C', single24C.key);
+  const octaveOffsets = [0, 2, 4, 5, 7, 9, 12, 11];
+  for (let i = 0; i < 24; i += 1) {
+    const hole = single24C.holes[i];
+    const expected = 60 + Math.floor(i / 8) * 12 + octaveOffsets[i % 8];
+    check(`Y2411 第 ${i + 1} 孔音高与吹吸`,
+      i % 2 === 0 ? hole.blow === expected && hole.draw === null : hole.draw === expected && hole.blow === null);
+  }
   check('C→G 就近移调 −5 半音', keyShift('C', 'G') === -5, `${keyShift('C', 'G')}`);
   check('C→F 就近移调 +5 半音', keyShift('C', 'F') === 5, `${keyShift('C', 'F')}`);
   const upFifth = transposeHoles(single24C.holes, 7);
