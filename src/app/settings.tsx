@@ -1,7 +1,7 @@
+import { MotionPressable as Pressable } from '../ui/components/MotionPressable';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,

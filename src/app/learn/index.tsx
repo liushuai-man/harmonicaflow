@@ -1,6 +1,7 @@
+import { MotionPressable as Pressable } from '../../ui/components/MotionPressable';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MUSIC_BASICS } from '../../content/musicBasics';

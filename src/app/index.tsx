@@ -1,7 +1,8 @@
+import { MotionPressable as Pressable } from '../ui/components/MotionPressable';
 import * as DocumentPicker from 'expo-document-picker';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { arrange } from '../core/arrange';
