@@ -1,5 +1,7 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { INTERACTION_MS } from '../../core/visual/params';
 import { readableOn } from '../../theme/color';
 import { useTheme } from '../../theme/ThemeProvider';
 import { MIN_TOUCH, elevation, radius, spacing } from '../../theme/tokens';
@@ -34,6 +36,7 @@ export interface ButtonProps {
 const HEIGHTS: Record<ButtonSize, number> = { sm: 38, md: 46, lg: 52 };
 const FONT_SIZES: Record<ButtonSize, number> = { sm: 13, md: 15, lg: 16 };
 const ICON_SIZES: Record<ButtonSize, number> = { sm: 15, md: 17, lg: 19 };
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export function Button({
   label,
@@ -52,15 +55,28 @@ export function Button({
   const { background, foreground, border } = resolve(variant, colors);
   const inactive = disabled || loading;
   const iconSize = ICON_SIZES[size];
+  const reducedMotion = useReducedMotion();
+  const pressed = useSharedValue(false);
+  const hovered = useSharedValue(false);
+  const feedback = useAnimatedStyle(() => ({
+    opacity: withTiming(inactive ? 0.45 : pressed.value ? 0.85 : hovered.value ? 0.93 : 1,
+      { duration: reducedMotion ? 0 : INTERACTION_MS }),
+    transform: [{ scale: withTiming(!inactive && pressed.value && !reducedMotion ? 0.985 : 1,
+      { duration: reducedMotion ? 0 : INTERACTION_MS }) }],
+  }));
 
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={onPress}
+      onPressIn={() => { pressed.value = true; }}
+      onPressOut={() => { pressed.value = false; }}
+      onHoverIn={() => { hovered.value = true; }}
+      onHoverOut={() => { hovered.value = false; }}
       disabled={inactive}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: inactive, busy: loading }}
-      style={({ pressed }) => [
+      style={[
         styles.button,
         {
           backgroundColor: background,
@@ -70,9 +86,8 @@ export function Button({
         },
         variant === 'primary' && elevation(1, colors.shadow),
         fullWidth && styles.fullWidth,
-        inactive && styles.disabled,
-        pressed && styles.pressed,
         style,
+        feedback,
       ]}
     >
       {loading ? (
@@ -88,7 +103,7 @@ export function Button({
           ) : null}
         </View>
       )}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
@@ -123,12 +138,5 @@ const styles = StyleSheet.create({
   },
   label: {
     fontWeight: '600',
-  },
-  disabled: {
-    opacity: 0.45,
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.985 }],
   },
 });

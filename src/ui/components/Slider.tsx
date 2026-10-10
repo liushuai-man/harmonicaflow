@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
 import { PanResponder, StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { INTERACTION_MS } from '../../core/visual/params';
 import { useTheme } from '../../theme/ThemeProvider';
 
 /**
@@ -24,22 +25,28 @@ export interface SliderProps {
   /** 量化步长 */
   step?: number;
   onChange: (value: number) => void;
+  /** 拖动时按量化后的数值预览；仅更新画面，不持久化。 */
+  onPreview?: (value: number) => void;
   /** 右侧数值回显的格式化 */
   formatValue?: (value: number) => string;
 }
 
-export function Slider({ value, min, max, step = 1, onChange, formatValue }: SliderProps) {
+export function Slider({ value, min, max, step = 1, onChange, onPreview, formatValue }: SliderProps) {
   const { colors } = useTheme();
   const [width, setWidth] = useState(0);
   const [draft, setDraft] = useState<number | null>(null);
   const thumbX = useSharedValue(0);
+  const reducedMotion = useReducedMotion();
+  const dragging = useRef(false);
 
   // PanResponder 只创建一次，通过 ref 读取最新的区间与回调，避免闭包过期
-  const cfg = useRef({ min, max, step, onChange });
+  const cfg = useRef({ min, max, step, onChange, onPreview, value });
   cfg.current.min = min;
   cfg.current.max = max;
   cfg.current.step = step;
   cfg.current.onChange = onChange;
+  cfg.current.onPreview = onPreview;
+  cfg.current.value = value;
 
   const widthRef = useRef(0);
   const travelRef = useRef(1);
@@ -49,17 +56,22 @@ export function Slider({ value, min, max, step = 1, onChange, formatValue }: Sli
   const travel = Math.max(width - THUMB, 1);
 
   useEffect(() => {
-    if (draft !== null) return;
+    if (dragging.current) return;
     const ratio = max > min ? (value - min) / (max - min) : 0;
-    thumbX.value = withTiming(ratio * travel, { duration: 140 });
-  }, [value, min, max, travel, draft, thumbX]);
+    thumbX.value = withTiming(ratio * travel, { duration: reducedMotion ? 0 : INTERACTION_MS });
+  }, [value, min, max, travel, draft, thumbX, reducedMotion]);
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => update(event.nativeEvent.locationX),
+        onPanResponderGrant: (event) => {
+          dragging.current = true;
+          shownRef.current = cfg.current.value;
+          setDraft(cfg.current.value);
+          update(event.nativeEvent.locationX);
+        },
         onPanResponderMove: (event) => update(event.nativeEvent.locationX),
         onPanResponderRelease: () => commit(),
         onPanResponderTerminate: () => commit(),
@@ -80,10 +92,12 @@ export function Slider({ value, min, max, step = 1, onChange, formatValue }: Sli
     if (shownRef.current !== snapped) {
       shownRef.current = snapped;
       setDraft(snapped);
+      cfg.current.onPreview?.(snapped);
     }
   }
 
   function commit() {
+    dragging.current = false;
     const next = draftRef.current;
     shownRef.current = next;
     setDraft(null);

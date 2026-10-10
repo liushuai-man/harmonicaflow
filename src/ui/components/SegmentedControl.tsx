@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 
 import { useTheme } from '../../theme/ThemeProvider';
+import { INTERACTION_MS } from '../../core/visual/params';
 import { elevation, radius, spacing } from '../../theme/tokens';
 import { Icon, type IconName } from './Icon';
 
@@ -32,6 +34,39 @@ export interface SegmentedControlProps<T extends string> {
 
 /** 轨道内边距，滑块四周留出同样的呼吸位 */
 const PAD = 3;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function SegmentItem<T extends string>({ option, active, onChange }: {
+  option: SegmentedOption<T>;
+  active: boolean;
+  onChange: (value: T) => void;
+}) {
+  const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
+  const pressed = useSharedValue(false);
+  const hovered = useSharedValue(false);
+  const feedback = useAnimatedStyle(() => ({
+    opacity: withTiming(pressed.value ? 0.65 : hovered.value ? 0.85 : 1,
+      { duration: reducedMotion ? 0 : INTERACTION_MS }),
+  }));
+  const tint = active ? colors.accent : colors.textMuted;
+  return (
+    <AnimatedPressable
+      onPress={() => onChange(option.value)}
+      onPressIn={() => { pressed.value = true; }}
+      onPressOut={() => { pressed.value = false; }}
+      onHoverIn={() => { hovered.value = true; }}
+      onHoverOut={() => { hovered.value = false; }}
+      accessibilityRole="button"
+      accessibilityLabel={option.label}
+      accessibilityState={{ selected: active }}
+      style={[styles.item, feedback]}
+    >
+      {option.icon ? <Icon name={option.icon} size={15} color={tint} strokeWidth={2} /> : null}
+      <Text style={[styles.label, { color: tint }, active && styles.labelActive]}>{option.label}</Text>
+    </AnimatedPressable>
+  );
+}
 
 export function SegmentedControl<T extends string>({
   options,
@@ -40,6 +75,7 @@ export function SegmentedControl<T extends string>({
 }: SegmentedControlProps<T>) {
   const { colors } = useTheme();
   const [trackWidth, setTrackWidth] = useState(0);
+  const reducedMotion = useReducedMotion();
 
   const index = Math.max(
     0,
@@ -48,8 +84,8 @@ export function SegmentedControl<T extends string>({
   const progress = useSharedValue(index);
 
   useEffect(() => {
-    progress.value = withTiming(index, { duration: 220, easing: Easing.out(Easing.cubic) });
-  }, [index, progress]);
+    progress.value = withTiming(index, { duration: reducedMotion ? 0 : INTERACTION_MS, easing: Easing.out(Easing.cubic) });
+  }, [index, progress, reducedMotion]);
 
   const itemWidth = trackWidth > 0 ? (trackWidth - PAD * 2) / options.length : 0;
 
@@ -77,25 +113,9 @@ export function SegmentedControl<T extends string>({
         />
       ) : null}
 
-      {options.map((option) => {
-        const active = option.value === value;
-        const tint = active ? colors.accent : colors.textMuted;
-        return (
-          <Pressable
-            key={option.value}
-            onPress={() => onChange(option.value)}
-            accessibilityRole="button"
-            accessibilityLabel={option.label}
-            accessibilityState={{ selected: active }}
-            style={styles.item}
-          >
-            {option.icon ? <Icon name={option.icon} size={15} color={tint} strokeWidth={2} /> : null}
-            <Text style={[styles.label, { color: tint }, active && styles.labelActive]}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+      {options.map((option) => (
+        <SegmentItem key={option.value} option={option} active={option.value === value} onChange={onChange} />
+      ))}
     </View>
   );
 }

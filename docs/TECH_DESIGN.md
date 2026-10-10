@@ -463,6 +463,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 
 ### 7.8 UI 设计系统（`theme/tokens.ts` + `ui/components/`）
 
+2026-10-10：Button / SegmentedControl 按下、松开与选项反馈统一使用 INTERACTION_MS=120ms，支持系统减少动态效果。Slider 新增可选 onPreview(number)，仅量化变化时预览；onChange 仍在松手/取消手势时提交，不在拖动中写盘。
+
 设计原则以 [UI_DESIGN.md](./UI_DESIGN.md) 为准。下列组件是当前实现；字体层级、动作级底栏强调、减少装饰动效和完整状态覆盖属于 T1 待验证/待完善项目，不因写入本文视为已经实现。皮肤扩展只改视觉令牌，不改编配、时间换算或孔位映射；新增偏好须说明价值与组合验收，不自动添加设置项。
 
 参照 shadcn/ui 的「开放代码 + 可组合 + 好看默认值」思路，把散落在页面里的内联样式收敛成一层自有组件，
