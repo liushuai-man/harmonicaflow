@@ -12,6 +12,7 @@ import { usePrefs } from '../store/prefs';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
 import { Button } from './components';
+import { NotationStaff } from './NotationStaff';
 import { NoteTimeline } from './NoteTimeline';
 import { TransportBar } from './TransportBar';
 
@@ -22,7 +23,7 @@ export function ExercisePlayer({ id, layout }: { id: string; layout: HarmonicaLa
   const definition = EXERCISES.find((exercise) => exercise.id === id);
   const data = useMemo(() => {
     const score = buildExercise(id, layout);
-    return score ? { timeline: buildTimeline(score), result: arrange(score, layout) } : null;
+    return score ? { score, timeline: buildTimeline(score), result: arrange(score, layout) } : null;
   }, [id, layout]);
   const playback = usePlayback(data?.timeline.totalMs ?? 0, 1);
   const { pause } = playback;
@@ -44,6 +45,7 @@ export function ExercisePlayer({ id, layout }: { id: string; layout: HarmonicaLa
       <NoteTimeline notes={data.result.notes} timeline={data.timeline} positionMs={playback.positionMs} revision={playback.revision}
         holes={layout.holes} tonicPc={keySignatureToTonicPc(layout.key)} flow={prefs.flow}
         viewAngle={prefs.viewAngle} staffBar={prefs.staffBar} />
+      {prefs.notation ? <NotationStaff score={data.score} timeline={data.timeline} positionMs={playback.positionMs} /> : null}
     </View>
     <TransportBar isPlaying={playback.isPlaying} speed={playback.speed} positionMs={playback.positionMs}
       totalMs={data.timeline.totalMs} onPlayPause={playback.isPlaying ? playback.pause : playback.play}

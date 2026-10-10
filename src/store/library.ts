@@ -82,6 +82,8 @@ export interface Prefs {
   viewAngle: number;
   /** 横向琴谱条：完整谱面 / 判定线附近精简提示 / 关闭 */
   staffBar: StaffBarMode;
+  /** 同步五线谱；旧偏好缺失字段时迁移为开启。 */
+  notation: boolean;
   /** 是否允许拉取在线随机封面（默认关；离线优先） */
   onlineCover: boolean;
   /** 用户校对后的音阶表覆盖：layoutId → holes */
@@ -100,6 +102,7 @@ export const DEFAULT_PREFS: Prefs = {
   flow: DEFAULT_FLOW,
   viewAngle: DEFAULT_VIEW_ANGLE,
   staffBar: DEFAULT_STAFF_BAR,
+  notation: true,
   onlineCover: DEFAULT_ONLINE_COVER,
   layoutOverrides: {},
   layoutKeys: {},
@@ -351,6 +354,7 @@ export async function loadPrefs(): Promise<Prefs> {
       flow: pickEnum(parsed.flow, ['down', 'right', 'auto'] as const, DEFAULT_PREFS.flow),
       viewAngle,
       staffBar: pickEnum(parsed.staffBar, ['full', 'hint', 'off'] as const, DEFAULT_PREFS.staffBar),
+      notation: typeof parsed.notation === 'boolean' ? parsed.notation : DEFAULT_PREFS.notation,
       onlineCover: parsed.onlineCover === true,
       layoutOverrides: parsed.layoutOverrides ?? {},
       layoutKeys: parsed.layoutKeys ?? {},

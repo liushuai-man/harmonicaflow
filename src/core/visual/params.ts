@@ -77,6 +77,9 @@ export const STAFF_BAR_H = 38;
 export const STAFF_BAR_PX_PER_SEC = 44;
 /** `full` 模式下预排到判定线两侧的音符数上限（避免长曲全量渲染） */
 export const STAFF_BAR_WINDOW = 24;
+export const NOTATION_HEIGHT = 148;
+export const NOTATION_BEAT_WIDTH = 64;
+export const NOTATION_STEP = 5;
 
 // ── 用户可选项的类型（值本身进 Prefs，见 store/library.ts §8） ──
 /** 皮肤：白线（mono）/ 彩色（color） */

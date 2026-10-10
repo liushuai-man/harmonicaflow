@@ -28,6 +28,9 @@ export function PracticeSettings({ prefs, onChange, onPreviewAngle, includeLayou
     {label('简谱提示')}
     <SegmentedControl options={[{ label: '完整', value: 'full' }, { label: '精简', value: 'hint' }, { label: '关闭', value: 'off' }]}
       value={prefs.staffBar} onChange={staffBar => onChange({ staffBar })} />
+    {label('同步五线谱')}
+    <SegmentedControl options={[{ label: '显示', value: 'on' }, { label: '关闭', value: 'off' }]}
+      value={prefs.notation ? 'on' : 'off'} onChange={value => onChange({ notation: value === 'on' })} />
     {includeLayout ? <>
       {label('口琴预设（详细校对在全局设置）')}
       {LAYOUTS.map(layout => <Button key={layout.id} label={layout.name} size="sm"

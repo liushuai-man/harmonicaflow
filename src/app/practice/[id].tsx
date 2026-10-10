@@ -16,6 +16,7 @@ import { usePrefs } from '../../store/prefs';
 import { useTheme } from '../../theme/ThemeProvider';
 import { radius, spacing } from '../../theme/tokens';
 import { Button, Icon, SongCover } from '../../ui/components';
+import { NotationStaff } from '../../ui/NotationStaff';
 import { NoteTimeline } from '../../ui/NoteTimeline';
 import { PracticeSettingsPanel } from '../../ui/PracticeSettingsPanel';
 import { TransportBar } from '../../ui/TransportBar';
@@ -233,6 +234,7 @@ export default function PracticeScreen() {
       ) : result && timeline && score ? (
         <>
           <View style={{ flex: 1, flexDirection: window.width > window.height ? 'row' : 'column' }}>
+          <View style={{ flex: 1 }}>
           <NoteTimeline
             notes={result.notes}
             timeline={timeline}
@@ -244,6 +246,8 @@ export default function PracticeScreen() {
             viewAngle={previewAngle ?? prefs.viewAngle}
             staffBar={prefs.staffBar}
           />
+          {prefs.notation ? <NotationStaff score={score} timeline={timeline} positionMs={positionMs} /> : null}
+          </View>
           <PracticeSettingsPanel open={settingsOpen} onClose={closeSettings} prefs={{ ...prefs, viewAngle: previewAngle ?? prefs.viewAngle }}
             onPreviewAngle={setPreviewAngle} onChange={patch => { setPreviewAngle(null); void updatePrefs(patch); }} />
           </View>
