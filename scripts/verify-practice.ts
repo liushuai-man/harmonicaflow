@@ -40,4 +40,9 @@ assert.equal(odd.symbols[0].denominator, null);
 assert.equal(odd.symbols[0].duration, 160);
 assert.equal(odd.warnings.length, 1);
 assert.deepEqual(buildNotation({ ...score, events: [] }).symbols, []);
+const carried = buildNotation({ ...score, keySignature: 'C', events: [
+  { id: 'tie-sharp', midi: 66, startTicks: 1440, durationTicks: 960 },
+  { id: 'new-sharp', midi: 66, startTicks: 2400, durationTicks: 480 },
+] });
+assert.equal(carried.symbols.find(s => s.id === 'new-sharp:0')?.accidental, 1);
 console.log('✓ 五线谱：调号、还原、附点、休止、跨小节延音、非标准时值提示');

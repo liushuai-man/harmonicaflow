@@ -79,7 +79,8 @@ export function buildNotation(score: Score) {
       if (pitch) {
         const previous = accidentals.get(pitch.step) ?? key[((pitch.step % 7) + 7) % 7];
         if (previous !== pitch.alter && part === 0) accidental = pitch.alter;
-        accidentals.set(pitch.step, pitch.alter);
+        // 跨小节延音只延续发声，不建立新小节的临时记号状态。
+        if (part === 0) accidentals.set(pitch.step, pitch.alter);
       }
       symbols.push({ id: `${id}:${part}`, start: cursor, duration: ticks, step: pitch?.step ?? null,
         accidental, denominator: value?.denominator ?? null, dotted: value?.dotted ?? false,

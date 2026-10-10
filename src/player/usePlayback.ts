@@ -74,10 +74,11 @@ export function usePlayback(
   );
 
   const handleFinish = useCallback(() => {
+    revision.value += 1;
     playingRef.current = false;
     setIsPlaying(false);
     clock?.pause();
-  }, [clock]);
+  }, [clock, revision]);
 
   const startFrom = useCallback(
     (fromMs: number) => {

@@ -4,12 +4,12 @@ import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, type SharedVa
 import Svg, { Ellipse, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import type { Score } from '../core/model';
 import { buildNotation, type StaffSymbol } from '../core/notation';
-import { NOTATION_BEAT_WIDTH, NOTATION_HEIGHT, NOTATION_STEP, WINDOW_STEP_MS } from '../core/visual/params';
+import { NOTATION_BEAT_WIDTH, NOTATION_HEIGHT, NOTATION_STEP, WINDOW_STEP_MS, TILE_SIZE } from '../core/visual/params';
 import { LEAD_IN_MS, type TimelineInfo } from '../player/timing';
 import { useTheme } from '../theme/ThemeProvider';
 
-function Glyph({ symbol, y, stepSize, color, span, ppq }: {
-  symbol: StaffSymbol; y: number; stepSize: number; color: string; span: number; ppq: number;
+function Glyph({ symbol, y, stepSize, color, ppq }: {
+  symbol: StaffSymbol; y: number; stepSize: number; color: string; ppq: number;
 }) {
   const { denominator: denominator, dotted, accidental } = symbol;
   const flags = denominator && denominator > 4 ? Math.log2(denominator / 4) : 0;
@@ -19,7 +19,7 @@ function Glyph({ symbol, y, stepSize, color, span, ppq }: {
     for (let step = 28; step >= symbol.step; step -= 2) ledgers.push(bottom + (30 - step) * stepSize);
     for (let step = 40; step <= symbol.step; step += 2) ledgers.push(bottom + (30 - step) * stepSize);
   }
-  return <Svg width={span + 28} height={NOTATION_HEIGHT}>
+  return <Svg width={56} height={NOTATION_HEIGHT}>
     {symbol.step === null ? <G>
       {denominator === 1 || denominator === 2
         ? <Rect x={16} y={bottom - (denominator === 1 ? 6 : 5) * stepSize} width={11} height={4} fill={color} />
@@ -34,23 +34,22 @@ function Glyph({ symbol, y, stepSize, color, span, ppq }: {
         fill={denominator === 1 || denominator === 2 ? 'none' : color} stroke={color} strokeWidth={1.4} />
       {denominator !== 1 ? <Line x1={28} x2={28} y1={y} y2={y - 25} stroke={color} strokeWidth={1.4} /> : null}
       {Array.from({ length: flags }, (_, i) => <Path key={i} d={`M28 ${y - 25 + i * 5} q12 6 4 14 q5 -7 -4 -9`} fill={color} />)}
-      {symbol.tieOut ? <Path d={`M25 ${y + 8} Q${22 + span / 2} ${y + 20} ${span + 19} ${y + 8}`} fill="none" stroke={color} /> : null}
     </G>}
     {dotted ? <Ellipse cx={34} cy={y - 2} rx={1.5} ry={1.5} fill={color} /> : null}
     {denominator === null ? <SvgText x={16} y={NOTATION_HEIGHT - 5} fontSize={9} fill={color}>{`${Number((symbol.duration / ppq).toFixed(3))}拍`}</SvgText> : null}
   </Svg>;
 }
 
-function StaffNote({ symbol, bottom, stepSize, pxPerTick, color, highlight, positionMs, timeline, ppq, width }: {
+function StaffNote({ symbol, bottom, stepSize, pxPerTick, color, highlight, positionMs, timeline, ppq }: {
   symbol: StaffSymbol; bottom: number; stepSize: number; pxPerTick: number; color: string; highlight: string;
-  positionMs: SharedValue<number>; timeline: TimelineInfo; ppq: number; width: number;
+  positionMs: SharedValue<number>; timeline: TimelineInfo; ppq: number;
 }) {
   const style = useAnimatedStyle(() => {
     const start = symbol.start * timeline.msPerTick + LEAD_IN_MS;
     return { opacity: positionMs.value >= start && positionMs.value < start + symbol.duration * timeline.msPerTick ? 1 : 0 };
   });
   const props = { symbol, y: bottom - ((symbol.step ?? 34) - 30) * stepSize, stepSize,
-    span: Math.min(width * 2, Math.max(40, symbol.duration * pxPerTick)), ppq };
+    ppq };
   return <View style={{ position: 'absolute', left: symbol.start * pxPerTick - 22, top: 0 }}>
     <Glyph {...props} color={color} />
     <Animated.View style={[StyleSheet.absoluteFill, style]}><Glyph {...props} color={highlight} /></Animated.View>
@@ -75,18 +74,20 @@ export function NotationStaff({ score, timeline, positionMs }: { score: Score; t
     return { pxPerTick: Math.max(NOTATION_BEAT_WIDTH / score.ppq, 36 / shortest), stepSize,
       bottom: 32 + (max - 30) * stepSize };
   }, [data, score.ppq]);
-  const cursorX = width * 0.35;
+  const headerWidth = 47 + Math.abs(data.fifths) * 8;
+  const cursorX = headerWidth + Math.max(0, width - headerWidth) * 0.35;
   const anchorTick = (anchor - LEAD_IN_MS) / timeline.msPerTick;
   const margin = WINDOW_STEP_MS * 2 / timeline.msPerTick;
   const from = anchorTick - cursorX / pxPerTick - margin;
   const to = anchorTick + (width - cursorX) / pxPerTick + margin;
   const visible = data.symbols.filter(s => s.start + s.duration >= from && s.start <= to);
+  const tieTiles: number[] = [];
+  for (let index = Math.max(0, Math.floor(from * pxPerTick / TILE_SIZE)); index * TILE_SIZE <= to * pxPerTick; index += 1) tieTiles.push(index);
   const bars: number[] = [];
   for (let bar = Math.max(0, Math.ceil(from / data.barTicks)); bar * data.barTicks <= to; bar += 1) bars.push(bar);
   const strip = useAnimatedStyle(() => ({ transform: [{ translateX: cursorX - (positionMs.value - LEAD_IN_MS) / timeline.msPerTick * pxPerTick }] }));
   const sharpSteps = [38, 35, 39, 36, 33, 37, 34];
   const flatSteps = [34, 37, 33, 36, 32, 35, 31];
-  const headerWidth = 47 + Math.abs(data.fifths) * 8;
   return <View style={{ backgroundColor: colors.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
     <Text style={[styles.caption, { color: colors.textMuted }]}>五线谱 · 单旋律{data.warnings.length ? ` · ${data.warnings.join('；')}` : ''}</Text>
     <View onLayout={e => setWidth(e.nativeEvent.layout.width)} style={styles.staff}>
@@ -95,8 +96,18 @@ export function NotationStaff({ score, timeline, positionMs }: { score: Score; t
       </Svg>
       <Animated.View style={[StyleSheet.absoluteFill, strip]}>
         {bars.map(bar => <View key={`bar${bar}`} style={{ position: 'absolute', left: bar * data.barTicks * pxPerTick, top: bottom - 8 * stepSize, height: 8 * stepSize, borderLeftWidth: 1, borderColor: colors.border }} />)}
+        {tieTiles.map(index => <View key={`tie${index}`} style={{ position: 'absolute', left: index * TILE_SIZE, top: 0 }}>
+          <Svg width={TILE_SIZE} height={NOTATION_HEIGHT}>
+            {visible.filter(symbol => symbol.tieOut).map(symbol => {
+              const x = symbol.start * pxPerTick - index * TILE_SIZE + 3;
+              const end = (symbol.start + symbol.duration) * pxPerTick - index * TILE_SIZE - 3;
+              const y = bottom - ((symbol.step ?? 30) - 30) * stepSize + 8;
+              return <Path key={symbol.id} d={`M${x} ${y} Q${(x + end) / 2} ${y + 12} ${end} ${y}`} fill="none" stroke={colors.text} />;
+            })}
+          </Svg>
+        </View>)}
         {visible.map(symbol => <StaffNote key={symbol.id} symbol={symbol} bottom={bottom} stepSize={stepSize} pxPerTick={pxPerTick}
-          color={colors.text} highlight={colors.accent} positionMs={positionMs} timeline={timeline} ppq={score.ppq} width={width} />)}
+          color={colors.text} highlight={colors.accent} positionMs={positionMs} timeline={timeline} ppq={score.ppq} />)}
       </Animated.View>
       <View pointerEvents="none" style={{ position: 'absolute', left: cursorX, top: 16, bottom: 10, borderLeftWidth: 1, borderColor: colors.accent }} />
       <View style={{ position: 'absolute', left: 0, top: 0, width: headerWidth, height: NOTATION_HEIGHT, backgroundColor: colors.surface }}>

@@ -19,7 +19,7 @@ export const MIN_BLOCK_PX = 8;
 /** 列内音块与边框的间距 */
 export const BLOCK_GAP = 3;
 /** 判定线下方的简谱标注区高度（down 方向） */
-export const LABEL_AREA_H = 42;
+export const LABEL_AREA_H = 64;
 /** 判定线右侧的简谱标注区宽度（right 方向） */
 export const LABEL_AREA_W = 42;
 /** 一次前进跨越的音符数超过该值视为拖动进度：只推游标、不补发特效 */

@@ -396,7 +396,7 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
   - 被透视压扁的远端小块（`w < 14` 或 `h < 14`）只画主体，避免远场出现噪点；音名标签垂直居中，避开顶部高光带。
   - 不使用 SVG `filter`（`feDropShadow` / `feGaussianBlur`）——在 react-native-svg 的 Android 实现上不可靠且开销大。
   - 渐变 id 必须是 URL 安全字符串：`url(#…)` 引用不了含冒号的 id（如 `React.useId()` 的输出）。
-- 判定线：`down` 位于 `playhead = height - LABEL_AREA_H`（底部留出 42px 简谱标注区），`right` 位于 `playhead = width - LABEL_AREA_W`（右侧留出标注区）；颜色取皮肤线条色（白线皮肤 = 细白线，彩色皮肤 = `theme.playhead`）。
+- 判定线：`down` 位于 `playhead = height - LABEL_AREA_H`（底部留出 64px 简谱标注区），`right` 位于 `playhead = width - LABEL_AREA_W`（右侧留出标注区）；颜色取皮肤线条色（白线皮肤 = 细白线，彩色皮肤 = `theme.playhead`）。
 - 判定线一侧的可视区单独用一个带 `overflow: hidden` 的容器包裹，方块越过判定线后即被裁掉，形成"压线即命中"的观感。
 - **横向琴谱条**（可选，`staffBar: 'full' | 'hint' | 'off'`）：一条独立于落块的读谱辅助——`full` 显示整曲按时间顺序的音名/简谱（小字号、只读、随 `positionMs` 高亮当前音），`hint` 只在判定线附近显示**即将到来的 1–2 小节**，`off` 不渲染。它复用 `core/pitch.ts` 的简谱输出，不参与时序与编配。
 
@@ -767,3 +767,5 @@ PracticeSettings 在全局页和跟吹页复用。竖屏底部抽屉、横屏侧
 ### 横竖屏实施补充（§7 / §11 / §11.8，2026-10-10）
 
 app.json orientation=default，跟随系统旋转锁设置，不新增方向库。新偏好 DEFAULT_FLOW=down；旧 auto/right 保留。跟吹页与练习页按 useWindowDimensions 重排而不重建播放 hook：横屏收紧顶栏/控制栏，五线谱与设置共用侧栏，保留完整瀑布高度，安全区避开挖孔和手势区。独立 APK 必须通过 EAS 重新构建以应用原生方向配置；本次未发起云端构建，Expo Go / 真机旋转仍待验证。
+
+复核修正（2026-10-10）：标签放独立层，避免分片接缝截字；过渡期间预排按 AHEAD_RATIO_MAX 固定上限，避免斜视转平铺提前剔除；LABEL_AREA_H=64 容纳半音阶四动作与孔号。播放完成也递增 revision 清除短尾粒子。五线谱延音线使用固定大小分片保持真实端点，播放线避开谱号/调号遮罩；跨小节延音不延续上一小节临时记号。

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
-import { PixelRatio, StyleSheet, View } from 'react-native';
+import { PixelRatio, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   runOnJS,
   useAnimatedReaction,
@@ -17,7 +17,6 @@ import Svg, {
   LinearGradient,
   Rect,
   Stop,
-  Text as SvgText,
 } from 'react-native-svg';
 
 import type { Hole, TabAction, TabNote } from '../core/model';
@@ -30,6 +29,7 @@ import {
   SETTINGS_TRANSITION_MS,
   K_DEFAULT,
   FLAT_ANGLE_DEG,
+  AHEAD_RATIO_MAX,
   MIN_BLOCK_PX,
   NOISE_MIN_PX,
   WINDOW_STEP_MS,
@@ -187,7 +187,7 @@ export function NoteTimeline({
   const chunkSize = tileSize(PixelRatio.get());
   const tiles = useMemo(() => {
     if (!geometry) return [];
-    return visibleTiles(anchorMs, geometry.ahead, pxPerMs, chunkSize, timeline.totalMs).map(index => {
+    return visibleTiles(anchorMs, geometry.playhead * AHEAD_RATIO_MAX, pxPerMs, chunkSize, timeline.totalMs).map(index => {
       const blocks: Block[] = [];
       for (const note of notes) {
         const startPx = (note.startTicks * timeline.msPerTick + LEAD_IN_MS) * pxPerMs;
@@ -340,13 +340,13 @@ export function NoteTimeline({
             >
               <Animated.View style={[StyleSheet.absoluteFill, { transformOrigin: horizontal ? '100% 50%' : '50% 100%' }, tiltStyle, appearanceStyle]}>
                 <View pointerEvents="none" style={[styles.canvas,
-                  horizontal ? { left: playhead - geometry.ahead, top: 0, width: geometry.ahead, height: size.height }
-                    : { left: 0, top: playhead - geometry.ahead, width: size.width, height: geometry.ahead }]}>
+                  horizontal ? { left: playhead - (playhead * AHEAD_RATIO_MAX), top: 0, width: (playhead * AHEAD_RATIO_MAX), height: size.height }
+                    : { left: 0, top: playhead - (playhead * AHEAD_RATIO_MAX), width: size.width, height: (playhead * AHEAD_RATIO_MAX) }]}>
                   {holes.map((hole, index) => <View key={hole.index} style={{
                     position: 'absolute', backgroundColor: index % 2 === 0 ? skin.laneStripe ?? 'transparent' : 'transparent',
                     borderColor: skin.divider,
-                    ...(horizontal ? { top: index * rowSize, left: 0, width: geometry.ahead, height: rowSize, borderTopWidth: skin.dividerWidth }
-                      : { left: index * rowSize, top: 0, height: geometry.ahead, width: rowSize, borderLeftWidth: skin.dividerWidth }),
+                    ...(horizontal ? { top: index * rowSize, left: 0, width: (playhead * AHEAD_RATIO_MAX), height: rowSize, borderTopWidth: skin.dividerWidth }
+                      : { left: index * rowSize, top: 0, height: (playhead * AHEAD_RATIO_MAX), width: rowSize, borderLeftWidth: skin.dividerWidth }),
                   }} />)}
                 </View>
                 <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]}>
@@ -446,28 +446,18 @@ export function NoteTimeline({
                       );
                     })}
 
-                    {blocks.map((block) => {
-                      const { note } = block;
-                      const face = note.feasible ? skin.block[note.action] : skin.block.infeasible;
-                      const short = Math.min(block.w, block.h);
-                      if (!block.label || block.w < 20 || block.h < 16) return null;
-                      return (
-                        <SvgText
-                          key={`${note.id}-label`}
-                          x={block.x + block.w / 2}
-                          // 垂直居中：避开高光带，长短音块都好看
-                          y={block.y + block.h / 2 + 3.5}
-                          fontSize={short >= 26 ? 10 : 8}
-                          fontWeight="600"
-                          fill={face.labelColor}
-                          textAnchor="middle"
-                        >
-                          {`${note.hole}·${note.noteName}`}
-                        </SvgText>
-                      );
-                    })}
                   </Svg>
                   </View>)}
+                  {tiles.flatMap(({ index, blocks }) => blocks.filter(block => block.label && block.w >= 20 && block.h >= 16).map(block => {
+                    const face = block.note.feasible ? skin.block[block.note.action] : skin.block.infeasible;
+                    const cx = block.x + block.w / 2 + (horizontal ? playhead - (index + 1) * chunkSize : 0);
+                    const cy = block.y + block.h / 2 + (horizontal ? 0 : playhead - (index + 1) * chunkSize);
+                    const labelWidth = Math.min(80, block.w);
+                    return <Text key={block.note.id} numberOfLines={1} style={{ position: 'absolute', left: cx - labelWidth / 2,
+                      top: cy - 6, width: labelWidth, height: 12, lineHeight: 12, textAlign: 'center', fontSize: 8, color: face.labelColor }}>
+                      {block.note.hole}·{block.note.noteName}
+                    </Text>;
+                  }))}
                 </Animated.View>
               </Animated.View>
             </View>
