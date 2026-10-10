@@ -356,6 +356,8 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 
 ### 7.2 播放状态机（`player/usePlayback.ts`）
 
+新增只读消费的 SharedValue revision：定位、重播、换曲递增，供呈现层清除离散特效。卸载取消 positionMs 动画。播放时钟显式 ReduceMotion.Never，减少动态效果只影响装饰，不允许系统把演奏时间跳到曲终。
+
 - 以 Reanimated 共享值 `positionMs` 承载播放位置，`play()` 用 `withTiming(totalMs, { duration: (totalMs - from)/speed, easing: linear })` 驱动，暂停时 `cancelAnimation` 并从当前值续播。
 - 对外暴露：`positionMs / isPlaying / speed / play / pause / restart / seek(ms) / setSpeed(x)`；倍速档位 `SPEED_OPTIONS = [0.5, 0.75, 1]`。函数签名新增可选第三参 `audioUri`，**不传时行为与以前完全一致**（本地计时器）。
 - **两套时钟（供给侧的桥接，见 §12.2）**：
@@ -430,13 +432,9 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 - 该变换只作用于展示容器，不影响时序与命中计算（判定线仍按未变换坐标计算）。
 - `down` 与 `right` 共用同一套公式，只是旋转轴与 `transformOrigin` 不同。
 
-### 7.5 触碰特效（`ui/effects/`）
+### 7.5 触碰特效
 
-- **触发**：判定线对应 `note.startMs`（`down` 为方块下沿压线、`right` 为方块右沿压线）。以 `useAnimatedReaction` 监听 `positionMs` 越过各接触时刻（跨桶判断），`runOnJS` 触发一次特效实例。
-- **渲染**：特效实例记录 `{ id, hole, action, color }`，在判定线该列中心渲染，约 320ms 后由实例自己回调 `onDone(id)` 移除；不阻塞主时间轴动画。
-- **可插拔**：`effects/types.ts` 定义 `TimelineEffect` 接口（`name` / `durationMs` / `render(ctx)`），`effects/registry.ts` 维护注册表，`effects/pulse.tsx` 为默认"脉冲环"。以后新增特效只需注册新实现，不改动 `NoteTimeline`。
-- 触发加了防刷量：单次前进跨越的音符数超过 `MAX_BURST = 8` 视为拖动进度，只推进游标不补发特效。
-- 颜色取该音所在 `action` 的主题色，与音块保持一致。
+默认碎裂特效由 5 个小碎片组成，240ms 时间轴时长，最多 8 个并发实例。尺寸、扩散距离与容量统一位于 core/visual/params.ts。粒子进度直接读取 positionMs，暂停冻结；定位、重播、换曲通过 Playback.revision 清理，跨过大量音符不补发。不可吹音不生成碎裂；系统减少动态效果时不显示粒子。装饰只表示起音提示，不代表用户吹对。旧圆环实现已移除。
 
 ### 7.6 音阶标注（判定线一侧）
 
@@ -755,3 +753,5 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 - AI 点评方案（录音 → 音高检测 → 评分 → LLM 点评）与统一提示词见 [AI_SCORING.md](./AI_SCORING.md)；**AI 的 API key 由用户自行配置**，与后端解耦。
 
 滚动参考：[Reanimated Marquee 开源示例](https://docs.swmansion.com/react-native-reanimated/examples/marquee/) 与 [性能指南](https://docs.swmansion.com/react-native-reanimated/docs/guides/performance/)，采用共享值平移与有界节点思路，未引入新依赖。V9/V10 仍需 Android 真机核验。
+
+时序接缝补充：连续 positionMs 与离散 revision 分离，视图切换不更新 revision；特效不得另用墙钟超时推进。

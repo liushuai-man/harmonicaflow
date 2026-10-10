@@ -134,7 +134,7 @@ export default function PracticeScreen() {
     }
   }, [score, layout]);
 
-  const { positionMs, isPlaying, speed, play, pause, restart, seek, setSpeed } = usePlayback(
+  const { revision, positionMs, isPlaying, speed, play, pause, restart, seek, setSpeed } = usePlayback(
     timeline?.totalMs ?? 0,
     prefs.speed,
     audioUri ?? undefined,
@@ -231,6 +231,7 @@ export default function PracticeScreen() {
             notes={result.notes}
             timeline={timeline}
             positionMs={positionMs}
+            revision={revision}
             holes={layout.holes}
             tonicPc={tonicPc}
             flow={prefs.flow}

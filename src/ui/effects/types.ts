@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { SharedValue } from 'react-native-reanimated';
 
 import type { TabAction } from '../../core/model';
 
@@ -10,6 +11,9 @@ import type { TabAction } from '../../core/model';
  */
 
 export interface EffectContext {
+  positionMs: SharedValue<number>;
+  startMs: number;
+  horizontal: boolean;
   /** 特效实例唯一 id（用于 key 与移除） */
   instanceId: number;
   /** 触发列的水平中心（容器坐标） */

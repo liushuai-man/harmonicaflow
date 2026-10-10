@@ -2,13 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
 import { PixelRatio, StyleSheet, View } from 'react-native';
 import Animated, {
-  Easing,
   runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
-  useSharedValue,
-  withSequence,
-  withTiming,
+  useDerivedValue,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, {
@@ -24,10 +21,10 @@ import type { Hole, TabAction, TabNote } from '../core/model';
 import { midiToJianpuText } from '../core/pitch';
 import {
   BLOCK_GAP,
-  HIT_HIGHLIGHT_MS,
   LABEL_AREA_H,
   LABEL_AREA_W,
   MAX_BURST,
+  SHATTER_MAX_INSTANCES,
   MIN_BLOCK_PX,
   NOISE_MIN_PX,
   WINDOW_STEP_MS,
@@ -77,12 +74,14 @@ interface EffectInstance {
   hole: number;
   action: TabAction;
   color: string;
+  startMs: number;
 }
 
 interface NoteTimelineProps {
   notes: TabNote[];
   timeline: TimelineInfo;
   positionMs: SharedValue<number>;
+  revision: SharedValue<number>;
   /** 口琴孔位，决定列数与底部音阶标注 */
   holes: Hole[];
   /** 主音音级（由调号换算），用于简谱表示 */
@@ -122,6 +121,7 @@ export function NoteTimeline({
   notes,
   timeline,
   positionMs,
+  revision,
   holes,
   tonicPc,
   flow,
@@ -201,9 +201,11 @@ export function NoteTimeline({
   );
 
   // ── 命中高亮（hover 联动）────────────────────────────────
-  const hitHoles = useMemo(() => notes.map((note) => note.hole), [notes]);
-  const hitHole = useSharedValue(-1);
-  const hitPulse = useSharedValue(0);
+  const hitHole = useDerivedValue(() => {
+    const note = notes[activeIndex.value];
+    return note?.feasible ? note.hole : -1;
+  });
+  const hitPulse = useDerivedValue(() => hitHole.value > 0 ? 0.35 : 0);
 
   const rowSize = geometry?.rowSize ?? 0;
   const playhead = geometry?.playhead ?? 0;
@@ -229,8 +231,6 @@ export function NoteTimeline({
     [notes, timeline.msPerTick],
   );
 
-  const hitCursor = useSharedValue(0);
-  const lastPos = useSharedValue(-1);
   const nextEffectId = useRef(0);
 
   const removeEffect = useCallback((id: number) => {
@@ -242,10 +242,11 @@ export function NoteTimeline({
       const created: EffectInstance[] = [];
       for (const index of indices) {
         const note = notes[index];
-        if (!note) continue;
+        if (!note?.feasible) continue;
         nextEffectId.current += 1;
         created.push({
           id: nextEffectId.current,
+          startMs: note.startTicks * timeline.msPerTick + LEAD_IN_MS,
           hole: note.hole,
           action: note.action,
           color: note.feasible
@@ -255,62 +256,30 @@ export function NoteTimeline({
             : colors.infeasibleBorder,
         });
       }
-      if (created.length > 0) setEffects((prev) => [...prev, ...created]);
+      if (created.length > 0) setEffects((prev) => [...prev, ...created].slice(-SHATTER_MAX_INSTANCES));
     },
-    [notes, colors],
+    [notes, colors, timeline.msPerTick],
   );
 
+  const clearEffects = useCallback(() => setEffects([]), []);
   useAnimatedReaction(
-    () => positionMs.value,
-    (value: number) => {
-      const last = lastPos.value;
-      lastPos.value = value;
-
-      if (hitTimes.length === 0) return;
-
-      // 回退（重播 / 向前拖动）：重新定位游标，不补发特效
-      if (value < last) {
-        let lo = 0;
-        while (lo < hitTimes.length && hitTimes[lo] <= value) lo += 1;
-        hitCursor.value = lo;
-        hitHole.value = -1;
-        hitPulse.value = 0;
+    () => ({ time: positionMs.value, revision: revision.value }),
+    (value, previous) => {
+      if (!previous || value.revision !== previous.revision || value.time < previous.time) {
+        runOnJS(clearEffects)();
         return;
       }
-
-      let i = hitCursor.value;
       const crossed: number[] = [];
-      while (i < hitTimes.length && hitTimes[i] <= value) {
-        crossed.push(i);
-        i += 1;
+      let lo = 0, hi = hitTimes.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (hitTimes[mid] <= previous.time) lo = mid + 1; else hi = mid;
       }
-      hitCursor.value = i;
-      if (crossed.length === 0) return;
-
-      // 命中高亮：只对最后一个越过的音发光，避免快速段落闪成一片
-      const lane = hitHoles[crossed[crossed.length - 1]];
-      if (typeof lane === 'number') {
-        hitHole.value = lane;
-        hitPulse.value = withSequence(
-          withTiming(1, { duration: 70, easing: Easing.out(Easing.quad) }),
-          withTiming(0, { duration: HIT_HIGHLIGHT_MS - 70, easing: Easing.in(Easing.quad) }),
-        );
-      }
-
-      // 一次跨越过多说明是拖动进度，跳过补发避免"特效轰炸"
-      if (crossed.length <= MAX_BURST) runOnJS(triggerHits)(crossed);
-    },
-    [hitTimes, hitHoles, triggerHits],
+      while (lo < hitTimes.length && hitTimes[lo] <= value.time && crossed.length <= MAX_BURST) crossed.push(lo++);
+      if (crossed.length > 0 && crossed.length <= MAX_BURST) runOnJS(triggerHits)(crossed);
+    }, [hitTimes, triggerHits, clearEffects],
   );
-
-  useEffect(() => {
-    // 换曲或重排指法后重算游标
-    hitCursor.value = 0;
-    lastPos.value = -1;
-    hitHole.value = -1;
-    hitPulse.value = 0;
-    setEffects([]);
-  }, [hitTimes, hitCursor, lastPos, hitHole, hitPulse]);
+  useEffect(clearEffects, [notes, clearEffects]);
 
   // 渐变方向：down 纵向、right 横向；两端偏移字段在两种方向下复用同一组渐变定义
   const gx2 = horizontal ? '1' : '0';
@@ -548,6 +517,7 @@ export function NoteTimeline({
                 const center = (item.hole - 1) * rowSize + rowSize / 2;
                 const ctx: EffectContext = {
                   instanceId: item.id,
+                  positionMs, startMs: item.startMs, horizontal,
                   x: horizontal ? playhead : center,
                   y: horizontal ? center : playhead,
                   columnWidth: rowSize,

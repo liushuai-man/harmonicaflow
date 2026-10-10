@@ -41,7 +41,7 @@ export function ExercisePlayer({ id, layout }: { id: string; layout: HarmonicaLa
       <Text style={[styles.caption, { color: colors.textMuted }]}>看底部孔位与吹吸，压线时演奏。无示范音或听音评分。</Text>
     </View>
     <View style={styles.container}>
-      <NoteTimeline notes={data.result.notes} timeline={data.timeline} positionMs={playback.positionMs}
+      <NoteTimeline notes={data.result.notes} timeline={data.timeline} positionMs={playback.positionMs} revision={playback.revision}
         holes={layout.holes} tonicPc={keySignatureToTonicPc(layout.key)} flow={prefs.flow}
         viewAngle={prefs.viewAngle} staffBar={prefs.staffBar} />
     </View>

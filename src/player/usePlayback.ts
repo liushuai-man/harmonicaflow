@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cancelAnimation,
   Easing,
+  ReduceMotion,
   runOnJS,
   useSharedValue,
   withTiming,
@@ -33,6 +34,8 @@ const SYNC_INTERVAL_MS = 300;
 const DRIFT_TOLERANCE_MS = 80;
 
 export interface Playback {
+  /** 定位/重播/换曲的离散版本，用于清除特效，不参与连续时钟。 */
+  revision: SharedValue<number>;
   /** 当前播放位置（毫秒），范围 [0, totalMs] */
   positionMs: SharedValue<number>;
   isPlaying: boolean;
@@ -54,6 +57,7 @@ export function usePlayback(
   audioUri?: string,
 ): Playback {
   const positionMs = useSharedValue(0);
+  const revision = useSharedValue(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeedState] = useState(initialSpeed);
 
@@ -85,7 +89,7 @@ export function usePlayback(
       setIsPlaying(true);
       positionMs.value = withTiming(
         total,
-        { duration: Math.max(1, (total - from) / speedRef.current), easing: Easing.linear },
+        { duration: Math.max(1, (total - from) / speedRef.current), easing: Easing.linear, reduceMotion: ReduceMotion.Never },
         (finished?: boolean) => {
           'worklet';
           if (finished) runOnJS(handleFinish)();
@@ -99,9 +103,10 @@ export function usePlayback(
     if (playingRef.current) return;
     const total = totalRef.current;
     const from = positionMs.value >= total - 1 ? 0 : positionMs.value;
+    if (from === 0) revision.value += 1;
     startFrom(from);
     clock?.startAt(from, speedRef.current);
-  }, [positionMs, startFrom, clock]);
+  }, [positionMs, startFrom, clock, revision]);
 
   const pause = useCallback(() => {
     cancelAnimation(positionMs);
@@ -111,13 +116,15 @@ export function usePlayback(
   }, [positionMs, clock]);
 
   const restart = useCallback(() => {
+    revision.value += 1;
     cancelAnimation(positionMs);
     startFrom(0);
     clock?.startAt(0, speedRef.current);
-  }, [positionMs, startFrom, clock]);
+  }, [positionMs, startFrom, clock, revision]);
 
   const seek = useCallback(
     (ms: number) => {
+      revision.value += 1;
       cancelAnimation(positionMs);
       const value = clamp(ms, 0, totalRef.current);
       positionMs.value = value;
@@ -126,7 +133,7 @@ export function usePlayback(
         clock?.startAt(value, speedRef.current);
       }
     },
-    [positionMs, startFrom, clock],
+    [positionMs, startFrom, clock, revision],
   );
 
   const setSpeed = useCallback(
@@ -160,12 +167,15 @@ export function usePlayback(
 
   // 换曲 / 换伴奏：位置归零并停止
   useEffect(() => {
+    revision.value += 1;
     cancelAnimation(positionMs);
     positionMs.value = 0;
     playingRef.current = false;
     setIsPlaying(false);
     clock?.pause();
-  }, [totalMs, positionMs, clock]);
+  }, [totalMs, positionMs, clock, revision]);
 
-  return { positionMs, isPlaying, speed, play, pause, restart, seek, setSpeed };
+  useEffect(() => () => cancelAnimation(positionMs), [positionMs]);
+
+  return { revision, positionMs, isPlaying, speed, play, pause, restart, seek, setSpeed };
 }

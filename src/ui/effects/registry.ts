@@ -1,4 +1,4 @@
-import { pulseEffect } from './pulse';
+import { shatterEffect } from './shatter';
 import type { TimelineEffect } from './types';
 
 /**
@@ -9,11 +9,11 @@ import type { TimelineEffect } from './types';
  */
 
 export const EFFECTS: Record<string, TimelineEffect> = {
-  [pulseEffect.name]: pulseEffect,
+  [shatterEffect.name]: shatterEffect,
 };
 
-export const DEFAULT_EFFECT_NAME = pulseEffect.name;
+export const DEFAULT_EFFECT_NAME = shatterEffect.name;
 
 export function getEffect(name: string = DEFAULT_EFFECT_NAME): TimelineEffect {
-  return EFFECTS[name] ?? pulseEffect;
+  return EFFECTS[name] ?? shatterEffect;
 }

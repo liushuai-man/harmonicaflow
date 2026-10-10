@@ -32,6 +32,11 @@ export const CULL_MARGIN_MS = WINDOW_STEP_MS;
 export const TILE_SIZE = 512;
 export const TILE_MAX_PHYSICAL_SIZE = 2048;
 export const SETTINGS_TRANSITION_MS = 180;
+export const SHATTER_MS = 240;
+export const SHATTER_PARTICLES = 5;
+export const SHATTER_MAX_INSTANCES = 8;
+export const SHATTER_DISTANCE = 18;
+export const SHATTER_SIZE = 3;
 
 // ── 视角 ────────────────────────────────────────────────
 /** 视角上限（度） */
