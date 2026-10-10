@@ -20,11 +20,19 @@ export const KEY_OPTIONS = [
 /**
  * 取预设。`overrides` 是用户在设置页校对后的音阶表覆盖（按 layoutId 存放），
  * 有覆盖时用它替换孔位数据 —— 排列始终是纯数据，算法里没有任何硬编码。
+ * `keys` 同步已保存的调号元数据；孔位已在设置保存时移调，此处不重复移调。
  */
-export function getLayout(id: string, overrides?: Record<string, Hole[]>): HarmonicaLayout {
+export function getLayout(id: string, overrides?: Record<string, Hole[]>, keys?: Record<string, string>): HarmonicaLayout {
   const base = LAYOUTS.find((l) => l.id === id) ?? tremolo24C;
   const holes = overrides?.[base.id];
-  return holes && holes.length > 0 ? { ...base, holes } : base;
+  const key = KEY_OPTIONS.find((value) => value === keys?.[base.id]) ?? base.key;
+  const effectiveHoles = holes && holes.length > 0 ? holes : base.holes;
+  return {
+    ...base,
+    key,
+    holes: effectiveHoles,
+    name: base.name.replace(/\d+ 孔/, `${effectiveHoles.length} 孔`).replace(`${base.key} 调`, `${key} 调`),
+  };
 }
 
 /** 由 `baseKey` 换到 `targetKey` 需要移动的半音数，取就近方向（-6..+6） */

@@ -69,8 +69,8 @@ export default function PracticeScreen() {
   }, [id]);
 
   const layout = useMemo(
-    () => getLayout(prefs.layoutId, prefs.layoutOverrides),
-    [prefs.layoutId, prefs.layoutOverrides],
+    () => getLayout(prefs.layoutId, prefs.layoutOverrides, prefs.layoutKeys),
+    [prefs.layoutId, prefs.layoutOverrides, prefs.layoutKeys],
   );
 
   // 在线随机封面：仅在开关打开且本曲还没有封面时拉取一次，成功后写回曲库

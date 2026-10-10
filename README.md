@@ -7,6 +7,7 @@
 - 详细设计：[docs/PRD.md](./docs/PRD.md)（需求）· [docs/TECH_DESIGN.md](./docs/TECH_DESIGN.md)（技术方案，**§11 为构建与部署方案**）· [docs/AI_SCORING.md](./docs/AI_SCORING.md)（录音评测方案，规划中）· [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)（系统架构：后端 / PC 端 / AI 层，规划中）
 - 过程管理：[docs/PLAN.md](./docs/PLAN.md)（后续任务规划：做什么、什么顺序、产出什么）· [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)（验收标准：怎么算做完、怎么验、怎么记录）
 - UI 设计：[docs/UI_DESIGN.md](./docs/UI_DESIGN.md)（品牌一致性、底部孔位/吹吸信息、个性化边界与视觉交付）
+- 代码审查：[2026-10-09 审查记录](./docs/REVIEW_2026-10-09.md)（10 月 8 日提交中的已复现问题）
 
 > 设计状态（2026-10-08）：当前交付主线是 Android 离线跟吹；电脑练习和博客独立展示模块属于扩展方向，尚无完整 Web 版。新视觉方向未定档，现有皮肤只是实现基线。功能“已实现”不等于真机“已验收”，以 PLAN / ACCEPTANCE 的记录为准。
 
@@ -17,6 +18,7 @@
 | 能力 | 说明 |
 |---|---|
 | 乐谱导入 | JSON / ABC 记谱 / MusicXML（`.musicxml` `.xml` `.mxl`） |
+| 入门学习 | 首页「从第一声开始」：三项基础音阶/节奏练习与六节读谱小课堂，完全离线 |
 | 自动编配 | 解析音高与时值 → 束搜索编配到孔位与吹吸 → 标记不可吹音 |
 | 口琴预设 | 24 孔复音 / 10 孔布鲁斯 / 半音阶，可切换；音阶表可逐孔校对 |
 | 跟吹视图 | **落块方向**（从上到下 / 从左到右 / 自动）+ 视角（垂直↔斜视，连续可调）+ 命中高亮 |
@@ -52,7 +54,8 @@ npm install
 ## 3. 项目结构
 
 ```
-src/app/              页面（Expo Router 路由）：index / practice/[id] / settings
+src/app/              页面（Expo Router 路由）：index / practice/[id] / settings / learn/index / learn/[id]
+src/content/          随包内置的基础乐理知识
 src/core/             纯 TS 核心：乐谱解析、编配算法、音高与简谱、音阶预设、视觉参数（core/visual）
 src/player/           时序与播放状态机
 src/theme/            主题色板、皮肤令牌、几何令牌（间距/圆角/投影）与 Provider
@@ -63,6 +66,7 @@ src/store/            曲库与偏好持久化
 assets/songs/         内置示例曲
 docs/                 PRD / 技术方案 / 系统架构 / 任务规划 / 验收标准
 scripts/verify-core.ts  核心逻辑自检脚本（无 UI，Node 直接跑）
+scripts/verify-learning.ts 入门练习与有效音阶表断言（由 verify-core 调用）
 .github/workflows/    CI/CD：质量门禁 / EAS 出包 / Web 发布到 GitHub Pages
 eas.json              EAS 构建档位
 ```

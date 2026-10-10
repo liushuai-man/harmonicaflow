@@ -8,6 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { verifyLearning } from './verify-learning';
 
 import { strToU8, zipSync } from 'fflate';
 
@@ -406,6 +407,7 @@ function main(): void {
   // 视觉几何自检（见 docs/TECH_DESIGN.md §7.11 / §9.1）
   verifyParsers();
   verifyLayouts();
+  verifyLearning();
 
   console.log('\n### core/visual 方向与视角几何自检');
   verifyCoreVisual();

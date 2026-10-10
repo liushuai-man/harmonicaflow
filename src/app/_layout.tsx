@@ -36,6 +36,8 @@ function ThemedStack() {
         <Stack.Screen name="index" options={{ title: '口琴跟吹助手' }} />
         <Stack.Screen name="practice/[id]" options={{ title: '跟吹' }} />
         <Stack.Screen name="settings" options={{ title: '设置' }} />
+        <Stack.Screen name="learn/index" options={{ title: '入门练习' }} />
+        <Stack.Screen name="learn/[id]" options={{ title: '基础练习' }} />
       </Stack>
     </>
   );

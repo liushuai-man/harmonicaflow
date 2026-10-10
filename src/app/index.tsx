@@ -33,7 +33,7 @@ export default function LibraryScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [statsMap, setStatsMap] = useState<Record<string, EntryStats>>({});
 
-  const layout = getLayout(prefs.layoutId, prefs.layoutOverrides);
+  const layout = getLayout(prefs.layoutId, prefs.layoutOverrides, prefs.layoutKeys);
 
   const refresh = useCallback(async () => {
     const list = await listLibrary();
@@ -50,7 +50,7 @@ export default function LibraryScreen() {
   // 后台逐首计算“不可吹音数”，分帧执行避免阻塞列表
   useEffect(() => {
     let cancelled = false;
-    const activeLayout = getLayout(prefs.layoutId, prefs.layoutOverrides);
+    const activeLayout = getLayout(prefs.layoutId, prefs.layoutOverrides, prefs.layoutKeys);
 
     (async () => {
       for (const entry of entries) {
@@ -73,7 +73,7 @@ export default function LibraryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [entries, prefs.layoutId, prefs.layoutOverrides]);
+  }, [entries, prefs.layoutId, prefs.layoutOverrides, prefs.layoutKeys]);
 
   const handleImport = useCallback(async () => {
     if (importing) return;
@@ -210,6 +210,16 @@ export default function LibraryScreen() {
                 </View>
               </Card>
 
+              <Card onPress={() => router.push('/learn')} accessibilityLabel="入门练习：基础音阶与读谱小课堂">
+                <View style={styles.cardRow}>
+                  <Icon name="music" size={26} color={colors.accent} />
+                  <View style={styles.cardBody}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>从第一声开始</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textMuted }]}>基础音阶练习 · 读谱小课堂</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colors.accent} />
+                </View>
+              </Card>
               <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>曲库</Text>
             </View>
           }

@@ -277,6 +277,14 @@ export interface TabNote extends NoteEvent {
 
 ---
 
+### 4.5 基础练习生成（`core/learning.ts`）
+
+`getLayout(id, overrides, keys)` 同时返回有效孔位、调号与显示名称；第三个参数读取已保存的 `layoutKeys`，不重复移调。调用方应同时传入两个覆盖表，避免孔位已换调但元数据仍标 C 调。
+
+纯函数 `buildExercise(id, layout)` 返回标准 `Score` 或 `null`。从实际吹/吸/推键音高集合中寻找当前调的最低完整大调八度，间隔为 `[0,2,4,5,7,9,11,12]`；缺音不降级成占位音，不硬编码琴型孔位。练习分别为音阶上下行（16 拍）、三音级进（28 拍，含 6 次一拍休止）、长短音与休止（12 拍，含 2 次一拍休止），统一 PPQ 480、4/4、60 BPM。休止以事件之间的间隔表达。
+
+谱面直接进入现有 `arrange` 和 `buildTimeline`，不经过外部文件解析器、不写曲库和偏好。教学文字为 `content/musicBasics.ts` 内置数据；新增内容目录只承载静态文案，不改变模块依赖方向。
+
 ## 5. 解析器设计
 
 统一入口：
@@ -296,6 +304,8 @@ parse(content: string | Uint8Array, filename: string): Score
 > **现状与目标分开**：MusicXML 只取第一个 `part`；同一 part 内多 voice 按「音数最多」选主声部并记入诊断，**不等于主旋律识别**。和弦游标与多声部重叠问题已修，统一由 `Score.diagnostics` 记录被忽略的内容（见 §5.1）。
 
 ### 5.1 语义正确性与诊断（基础契约已落地，PLAN T0）
+
+2026-10-09 审查补充：下述已实施能力仍有降号调、ABC 和弦调号和 MusicXML 和弦延音的已复现缺陷，尚不能视为 T0 完整通过；反例与位置见 [审查记录](./REVIEW_2026-10-09.md)。
 
 - 解析成功不等于语义正确。已修 ABC 调号及 Q 节拍单位、MusicXML 和弦/多声部；建立“解析 → 单旋律归一化 → 编配”的纯函数边界。首个 part 只是默认选择，不能等同主旋律识别。
 - 诊断区分完全支持（`full`）与可用但简化（`simplified`）；「无法练习」不产出 `Score`，解析器直接抛错。已记录被忽略的声部 / 反复 / 变速（`Score.diagnostics.notes`，含稳定 `code`）。不支持且影响音高或时序的内容不静默假装正确。
@@ -466,6 +476,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 - 组件只吃「语义色板 + 几何令牌」，页面不写死色值与投影；深浅配色、主色切换对全部组件即时生效。
 - 可达性与反馈统一：可点区域不低于 `MIN_TOUCH`，可点元素带 `accessibilityRole/Label/State`，并有按下反馈。
 - v0.3.0 新增组件：`SongCover`（曲目封面，见 §7.10）、`Slider`（连续角度 / 透明度的**高级调节**控件，用 RN 内置 `PanResponder` + Reanimated 共享值实现，**不引入** `@react-native-community/slider` 原生依赖），并给 `Button / Row / SegmentedControl` 补上指针 `hover` 态（PC / Web）。
+
+入门页面复用上述 Card / Badge / Button / Icon 与语义色，不新增运行时依赖或图标。`app/learn/index.tsx` 组合练习入口与乐理折叠卡片；`app/learn/[id].tsx` 等待偏好加载后挂载 `ui/ExercisePlayer.tsx`。播放器复用 NoteTimeline / TransportBar / usePlayback，按练习及有效音阶表重建会话；失焦暂停，不自动播放，不覆盖全局倍速偏好。教学练习不绑定伴奏、不请求在线封面；视觉默认值未调整。
 
 ### 7.9 命中高亮（hover 联动）
 

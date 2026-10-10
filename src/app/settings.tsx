@@ -174,8 +174,8 @@ export default function SettingsScreen() {
     return options;
   }, [prefs.viewAngle]);
   const layout = useMemo(
-    () => getLayout(selectedId, prefs.layoutOverrides),
-    [selectedId, prefs.layoutOverrides],
+    () => getLayout(selectedId, prefs.layoutOverrides, prefs.layoutKeys),
+    [selectedId, prefs.layoutOverrides, prefs.layoutKeys],
   );
   const isChromatic = layout.type === 'chromatic12';
 
