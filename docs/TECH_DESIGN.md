@@ -372,9 +372,9 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
   - `right`：Y = 孔位列，X = 时间；判定线在**右侧**竖线；音阶标注在判定线**右侧**（孔列自上而下依次排列）。
   - `auto`（默认）：按可视区**宽高比**自动选向——竖屏 / 窄窗选 `down`，横屏 / 宽窗选 `right`，随窗口尺寸变化即时重算（纯函数 `resolveFlow(flow, {width, height})`）。方向是**用户可改的偏好**，不是硬约束。
   - 切换方向保持 `positionMs` 不变（不打断滚动位置），仅重算布局参数。
-- 用一个 `Animated.View` 包裹整块 `<Svg>` 承载整体平移（而非动画 SVG 内部的 `<G>`，以规避 SVG 内部 transform 动画的兼容风险）；**只有 1 个动画节点**，滚动在 UI 线程完成，不触发 React 重渲染；平移轴随方向切换（`down` 用 `translateY`，`right` 用 `translateX`）。
+- 固定轨道层由视口与透视预排范围决定，曲终仍在；音块使用固定时间原点的 SVG 分片，每片不超过 512 逻辑像素且时间轴边长不超过 2048 物理像素。只挂载可见分片与缓冲区，共享一个 UI 线程平移；不再用全曲长度分配原生 SVG 位图。
 - **全曲绝对坐标**：音块坐标只由音符自身时刻决定，与可视窗口无关。滚动完全由 UI 线程的整块平移承担（anchor-free、永不重建），因此每 500ms 的重算不会改变渲染坐标，滚动连续无跳动。
-- **剔除**：`useAnimatedReaction` 监听 `positionMs`，每 500ms 通过 `runOnJS` 回传一次锚点；锚点**只用于剔除可视音块集合**（判定线上方 `ahead` 像素 + 判定线以下），渲染坐标不变，控制节点数 < 40。
+- **剔除**：每 500ms 回传窗口锚点，仅选择分片编号，绝不重设分片原点。跨片长音用相同绝对坐标裁剪，中心标签仅归属一个分片。可见画布数量与视口、密度、视角相关，不随总曲长增长；高密度音符仍需真机性能验证。
 - 坐标（统一用 `PX_PER_SEC = 160` 与 `BLOCK_GAP` / `MIN_BLOCK_PX`；画布长度 `songLen = (totalMs + LEAD_IN_MS) * pxPerMs + playhead`）：
 
   ```
@@ -503,6 +503,8 @@ right:  transform: [{ perspective: P }, { rotateY: 'θdeg' }]   transformOrigin:
 - **展示**：曲库列表项与跟吹页顶部各一处，圆角 + 细描边，随皮肤取色。
 
 ### 7.11 集中式视觉参数模块（`core/visual/`）
+
+2026-10-10：新增 `TILE_SIZE=512`、`TILE_MAX_PHYSICAL_SIZE=2048`、`SETTINGS_TRANSITION_MS=180`。分片算法位于 `core/visual/tiles.ts`，由 verify-practice 验证尺寸、接缝及标签归属。
 
 - **动机**：时间轴的尺寸 / 角度 / 时长原本散在 `NoteTimeline.tsx` 顶部常量与设置项里，调一个观感要翻多处。v0.3.0 把所有可调视觉常量**收敛到一个模块**，v0.4.0 进一步**下沉到平台无关的 `src/core/visual/`**：
   - `core/visual/params.ts`（纯常量，零依赖）：
@@ -749,3 +751,5 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 
 - 页面层**不直接 `fetch`**；真实外部能力任务启动后新增必要 service，先定义错误、取消、超时与降级契约，不提前创建空跑实现。
 - AI 点评方案（录音 → 音高检测 → 评分 → LLM 点评）与统一提示词见 [AI_SCORING.md](./AI_SCORING.md)；**AI 的 API key 由用户自行配置**，与后端解耦。
+
+滚动参考：[Reanimated Marquee 开源示例](https://docs.swmansion.com/react-native-reanimated/examples/marquee/) 与 [性能指南](https://docs.swmansion.com/react-native-reanimated/docs/guides/performance/)，采用共享值平移与有界节点思路，未引入新依赖。V9/V10 仍需 Android 真机核验。

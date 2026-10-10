@@ -28,6 +28,10 @@ export const MAX_BURST = 8;
 export const NOISE_MIN_PX = 14;
 /** 剔除余量（时间，ms）：锚点最多滞后一个重算步长，多留一点避免边缘闪入 */
 export const CULL_MARGIN_MS = WINDOW_STEP_MS;
+/** 每张 SVG 时间轴分片的逻辑尺寸上限；原生位图另按密度限制物理边长。 */
+export const TILE_SIZE = 512;
+export const TILE_MAX_PHYSICAL_SIZE = 2048;
+export const SETTINGS_TRANSITION_MS = 180;
 
 // ── 视角 ────────────────────────────────────────────────
 /** 视角上限（度） */

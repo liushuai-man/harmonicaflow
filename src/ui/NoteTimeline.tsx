@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
-import { StyleSheet, View } from 'react-native';
+import { PixelRatio, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -14,7 +14,6 @@ import Animated, {
 import Svg, {
   Defs,
   G,
-  Line,
   LinearGradient,
   Rect,
   Stop,
@@ -25,7 +24,6 @@ import type { Hole, TabAction, TabNote } from '../core/model';
 import { midiToJianpuText } from '../core/pitch';
 import {
   BLOCK_GAP,
-  CULL_MARGIN_MS,
   HIT_HIGHLIGHT_MS,
   LABEL_AREA_H,
   LABEL_AREA_W,
@@ -36,10 +34,10 @@ import {
   computeViewGeometry,
   laneOffset,
   resolveFlow,
-  timeOffset,
   type FlowSetting,
   type StaffBarMode,
 } from '../core/visual';
+import { tileNote, tileSize, visibleTiles } from '../core/visual/tiles';
 import { LEAD_IN_MS, type TimelineInfo } from '../player/timing';
 import { withAlpha } from '../theme/color';
 import { CurrentAction, LaneLabel, useActiveNote } from './PerformanceLabels';
@@ -71,6 +69,7 @@ interface Block {
   y: number;
   w: number;
   h: number;
+  label: boolean;
 }
 
 interface EffectInstance {
@@ -172,29 +171,25 @@ export function NoteTimeline({
     setSize({ width, height });
   };
 
-  const blocks = useMemo<Block[]>(() => {
+  const chunkSize = tileSize(PixelRatio.get());
+  const tiles = useMemo(() => {
     if (!geometry) return [];
-    const { axis, playhead, ahead, rowSize, songLen } = geometry;
-    const cull = CULL_MARGIN_MS * pxPerMs;
-    const acrossSize = Math.max(rowSize - BLOCK_GAP, 1);
-    const result: Block[] = [];
-    for (const note of notes) {
-      const startMs = note.startTicks * timeline.msPerTick;
-      const durationMs = note.durationTicks * timeline.msPerTick;
-      const span = Math.max(durationMs * pxPerMs, MIN_BLOCK_PX);
-      // 领边在屏幕上的位置（仅用于剔除，不参与渲染坐标）
-      const lead = playhead - (startMs + LEAD_IN_MS - anchorMs) * pxPerMs;
-      if (lead < -(ahead + cull) || lead - span > playhead) continue;
-      const across = laneOffset(note.hole, rowSize);
-      const along = timeOffset(startMs, LEAD_IN_MS, songLen, pxPerMs) - span;
-      result.push(
-        axis === 'y'
-          ? { note, x: across, y: along, w: acrossSize, h: span }
-          : { note, x: along, y: across, w: span, h: acrossSize },
-      );
-    }
-    return result;
-  }, [notes, timeline.msPerTick, anchorMs, pxPerMs, geometry]);
+    return visibleTiles(anchorMs, geometry.ahead, pxPerMs, chunkSize, timeline.totalMs).map(index => {
+      const blocks: Block[] = [];
+      for (const note of notes) {
+        const startPx = (note.startTicks * timeline.msPerTick + LEAD_IN_MS) * pxPerMs;
+        const span = Math.max(note.durationTicks * timeline.msPerTick * pxPerMs, MIN_BLOCK_PX);
+        const part = tileNote(startPx, span, index, chunkSize);
+        if (!part.visible) continue;
+        const across = laneOffset(note.hole, geometry.rowSize);
+        const breadth = Math.max(1, geometry.rowSize - BLOCK_GAP);
+        blocks.push(horizontal
+          ? { note, x: part.along, y: across, w: span, h: breadth, label: part.label }
+          : { note, x: across, y: part.along, w: breadth, h: span, label: part.label });
+      }
+      return { index, blocks };
+    });
+  }, [geometry, anchorMs, pxPerMs, chunkSize, timeline, notes, horizontal]);
 
   // anchor-free：位移只由播放位置决定，窗口锚点不参与，永不重建也永不跳变
   const animatedStyle = useAnimatedStyle(
@@ -371,29 +366,21 @@ export function NoteTimeline({
                     : null,
                 ]}
               >
-                <Animated.View
-                  style={[
-                    styles.canvas,
-                    horizontal
-                      ? {
-                          left: playhead - geometry.songLen,
-                          top: 0,
-                          width: geometry.songLen,
-                          height: size.height,
-                        }
-                      : {
-                          left: 0,
-                          top: playhead - geometry.songLen,
-                          width: size.width,
-                          height: geometry.songLen,
-                        },
-                    animatedStyle,
-                  ]}
-                >
-                  <Svg
-                    width={horizontal ? geometry.songLen : size.width}
-                    height={horizontal ? size.height : geometry.songLen}
-                  >
+                <View pointerEvents="none" style={[styles.canvas,
+                  horizontal ? { left: playhead - geometry.ahead, top: 0, width: geometry.ahead, height: size.height }
+                    : { left: 0, top: playhead - geometry.ahead, width: size.width, height: geometry.ahead }]}>
+                  {holes.map((hole, index) => <View key={hole.index} style={{
+                    position: 'absolute', backgroundColor: index % 2 === 0 ? skin.laneStripe ?? 'transparent' : 'transparent',
+                    borderColor: skin.divider,
+                    ...(horizontal ? { top: index * rowSize, left: 0, width: geometry.ahead, height: rowSize, borderTopWidth: skin.dividerWidth }
+                      : { left: index * rowSize, top: 0, height: geometry.ahead, width: rowSize, borderLeftWidth: skin.dividerWidth }),
+                  }} />)}
+                </View>
+                <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]}>
+                  {tiles.map(({ index, blocks }) => <View key={index} style={[styles.canvas, { overflow: 'hidden' },
+                    horizontal ? { left: playhead - (index + 1) * chunkSize, top: 0, width: chunkSize, height: size.height }
+                      : { left: 0, top: playhead - (index + 1) * chunkSize, width: size.width, height: chunkSize }]}>
+                  <Svg width={horizontal ? chunkSize : size.width} height={horizontal ? size.height : chunkSize}>
                     {/* 渐变只在 Defs 里各定义一次；objectBoundingBox 单位可被任意尺寸音块复用 */}
                     <Defs>
                       {(Object.keys(skin.block) as (TabAction | 'infeasible')[]).map((key) => {
@@ -414,33 +401,6 @@ export function NoteTimeline({
                         </LinearGradient>
                       ) : null}
                     </Defs>
-
-                    {/* 列/行轨道：交错淡底 + 分隔线，便于对准孔位 */}
-                    {holes.map((hole, index) =>
-                      skin.laneStripe && index % 2 === 0 ? (
-                        <Rect
-                          key={`lane-${hole.index}`}
-                          x={horizontal ? 0 : index * rowSize}
-                          y={horizontal ? index * rowSize : 0}
-                          width={horizontal ? geometry.songLen : rowSize}
-                          height={horizontal ? rowSize : geometry.songLen}
-                          fill={skin.laneStripe}
-                        />
-                      ) : null,
-                    )}
-                    {holes.map((hole, index) =>
-                      index > 0 ? (
-                        <Line
-                          key={`sep-${hole.index}`}
-                          x1={horizontal ? 0 : index * rowSize}
-                          y1={horizontal ? index * rowSize : 0}
-                          x2={horizontal ? geometry.songLen : index * rowSize}
-                          y2={horizontal ? index * rowSize : geometry.songLen}
-                          stroke={skin.divider}
-                          strokeWidth={skin.dividerWidth}
-                        />
-                      ) : null,
-                    )}
 
                     {/*
                       音块分层：投影 → 渐变主体 → 高光带 → 色阶线（推键再加内侧描边）。
@@ -517,7 +477,7 @@ export function NoteTimeline({
                       const { note } = block;
                       const face = note.feasible ? skin.block[note.action] : skin.block.infeasible;
                       const short = Math.min(block.w, block.h);
-                      if (block.w < 20 || block.h < 16) return null;
+                      if (!block.label || block.w < 20 || block.h < 16) return null;
                       return (
                         <SvgText
                           key={`${note.id}-label`}
@@ -534,6 +494,7 @@ export function NoteTimeline({
                       );
                     })}
                   </Svg>
+                  </View>)}
                 </Animated.View>
               </View>
             </View>

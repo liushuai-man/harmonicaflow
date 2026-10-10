@@ -1,3 +1,4 @@
+import './verify-practice';
 /**
  * 核心逻辑验证脚本（无需 UI）
  *
