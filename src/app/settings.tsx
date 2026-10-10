@@ -13,14 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KEY_OPTIONS, LAYOUTS, getLayout, keyShift, transposeHoles } from '../core/layouts';
 import type { Hole } from '../core/model';
 import { midiToNoteName, tryNoteNameToMidi } from '../core/pitch';
-import {
-  VIEW_ANGLE_MAX,
-  VIEW_PRESETS,
-  type FlowSetting,
-  type OpacityMode,
-  type SkinMode,
-  type StaffBarMode,
-} from '../core/visual';
+import { PracticeSettings } from '../ui/PracticeSettings';
 import type { ThemeMode } from '../store/library';
 import { usePrefs } from '../store/prefs';
 import { readableOn } from '../theme/color';
@@ -35,7 +28,6 @@ import {
   IconTile,
   Row,
   SegmentedControl,
-  Slider,
   type IconName,
 } from '../ui/components';
 
@@ -56,29 +48,6 @@ const THEME_OPTIONS: { label: string; value: ThemeMode; icon: IconName }[] = [
   { label: '跟随系统', value: 'system', icon: 'auto' },
   { label: '浅色', value: 'light', icon: 'sun' },
   { label: '深色', value: 'dark', icon: 'moon' },
-];
-
-const SKIN_OPTIONS: { label: string; value: SkinMode }[] = [
-  { label: '白线', value: 'mono' },
-  { label: '彩色', value: 'color' },
-];
-
-const OPACITY_OPTIONS: { label: string; value: OpacityMode }[] = [
-  { label: '实心', value: 'solid' },
-  { label: '柔和', value: 'soft' },
-  { label: '玻璃', value: 'glass' },
-];
-
-const FLOW_OPTIONS: { label: string; value: FlowSetting }[] = [
-  { label: '自动', value: 'auto' },
-  { label: '从上到下', value: 'down' },
-  { label: '从左到右', value: 'right' },
-];
-
-const STAFF_OPTIONS: { label: string; value: StaffBarMode }[] = [
-  { label: '完整谱面', value: 'full' },
-  { label: '精简提示', value: 'hint' },
-  { label: '关闭', value: 'off' },
 ];
 
 const COVER_OPTIONS: { label: string; value: 'on' | 'off' }[] = [
@@ -162,17 +131,6 @@ export default function SettingsScreen() {
   /** 当前琴的调号：用户选择优先，否则用预设自带调号 */
   const currentKey = prefs.layoutKeys[selectedId] ?? layoutBaseKey(selectedId);
 
-  /** 视角预设：当前角度若不是预设值，就临时加一个显示实际角度的选项，避免高亮错位 */
-  const presetOptions = useMemo(() => {
-    const options: { label: string; value: string }[] = VIEW_PRESETS.map((preset) => ({
-      label: preset.label,
-      value: `d${preset.degree}`,
-    }));
-    if (!VIEW_PRESETS.some((preset) => preset.degree === prefs.viewAngle)) {
-      options.push({ label: `${prefs.viewAngle}°`, value: `d${prefs.viewAngle}` });
-    }
-    return options;
-  }, [prefs.viewAngle]);
   const layout = useMemo(
     () => getLayout(selectedId, prefs.layoutOverrides, prefs.layoutKeys),
     [selectedId, prefs.layoutOverrides, prefs.layoutKeys],
@@ -308,20 +266,6 @@ export default function SettingsScreen() {
           onChange={(value) => updatePrefs({ themeMode: value })}
         />
 
-        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>皮肤</Text>
-        <SegmentedControl
-          options={SKIN_OPTIONS}
-          value={prefs.skin}
-          onChange={(value) => updatePrefs({ skin: value })}
-        />
-
-        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>透明度</Text>
-        <SegmentedControl
-          options={OPACITY_OPTIONS}
-          value={prefs.opacity}
-          onChange={(value) => updatePrefs({ opacity: value })}
-        />
-
         <View style={styles.swatchRow}>
           {ACCENT_PRESETS.map((preset) => {
             const active = preset.value.toLowerCase() === prefs.accent.toLowerCase();
@@ -353,37 +297,8 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section icon="target" title="跟吹视图" hint="落块方向、视角、琴谱都可自由定义，默认值只是顺手而已">
-        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>落块方向</Text>
-        <SegmentedControl
-          options={FLOW_OPTIONS}
-          value={prefs.flow}
-          onChange={(value) => updatePrefs({ flow: value })}
-        />
-
-        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-          视角（0° = 完全垂直，越大越斜视）
-        </Text>
-        <SegmentedControl
-          options={presetOptions}
-          value={`d${prefs.viewAngle}`}
-          onChange={(value) => updatePrefs({ viewAngle: Number(value.slice(1)) })}
-        />
-        <Slider
-          value={prefs.viewAngle}
-          min={0}
-          max={VIEW_ANGLE_MAX}
-          step={1}
-          onChange={(value) => updatePrefs({ viewAngle: value })}
-          formatValue={(value) => (value === 0 ? '垂直' : `${value}°`)}
-        />
-
-        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>横向琴谱</Text>
-        <SegmentedControl
-          options={STAFF_OPTIONS}
-          value={prefs.staffBar}
-          onChange={(value) => updatePrefs({ staffBar: value })}
-        />
+      <Section icon="target" title="跟吹视图" hint="跟吹页内也可展开这些设置并实时预览">
+        <PracticeSettings prefs={prefs} onChange={updatePrefs} />
       </Section>
 
       <Section

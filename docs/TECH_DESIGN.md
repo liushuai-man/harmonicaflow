@@ -755,3 +755,7 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 滚动参考：[Reanimated Marquee 开源示例](https://docs.swmansion.com/react-native-reanimated/examples/marquee/) 与 [性能指南](https://docs.swmansion.com/react-native-reanimated/docs/guides/performance/)，采用共享值平移与有界节点思路，未引入新依赖。V9/V10 仍需 Android 真机核验。
 
 时序接缝补充：连续 positionMs 与离散 revision 分离，视图切换不更新 revision；特效不得另用墙钟超时推进。
+
+### 跟吹页内设置实现（§7 / §8 补充，2026-10-10）
+
+PracticeSettings 在全局页和跟吹页复用。竖屏底部抽屉、横屏侧栏保留演奏区且不暂停；Android 返回先收起面板。角度预览仅页面内存，松手经 updatePrefs/docStore 保存；按钮选项即时保存。皮肤/透明度淡入、视角与抽屉使用180ms过渡并遵循减少动态效果。换琴只重编配，不重启播放位置；详细校对仍在全局页。

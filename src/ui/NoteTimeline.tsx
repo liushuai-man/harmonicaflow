@@ -6,6 +6,9 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
+  useReducedMotion,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, {
@@ -25,6 +28,9 @@ import {
   LABEL_AREA_W,
   MAX_BURST,
   SHATTER_MAX_INSTANCES,
+  SETTINGS_TRANSITION_MS,
+  K_DEFAULT,
+  FLAT_ANGLE_DEG,
   MIN_BLOCK_PX,
   NOISE_MIN_PX,
   WINDOW_STEP_MS,
@@ -134,6 +140,14 @@ export function NoteTimeline({
   const [effects, setEffects] = useState<EffectInstance[]>([]);
 
   const { activeIndex, activeNote } = useActiveNote(notes, timeline, positionMs);
+  const reduced = useReducedMotion();
+  const appearance = useSharedValue(1);
+  useEffect(() => {
+    appearance.value = reduced ? 1 : 0.65;
+    appearance.value = withTiming(1, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS });
+  }, [skin, reduced, appearance]);
+  const appearanceStyle = useAnimatedStyle(() => ({ opacity: appearance.value }));
+  const angle = useDerivedValue(() => withTiming(viewAngle, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS }));
   const holeCount = holes.length;
   const effect = getEffect();
 
@@ -209,6 +223,12 @@ export function NoteTimeline({
 
   const rowSize = geometry?.rowSize ?? 0;
   const playhead = geometry?.playhead ?? 0;
+  const tiltStyle = useAnimatedStyle(() => {
+    const degree = angle.value;
+    if (degree < FLAT_ANGLE_DEG) return { transform: [] };
+    const perspective = Math.max(1, K_DEFAULT * playhead * Math.tan(degree * Math.PI / 180));
+    return { transform: horizontal ? [{ perspective }, { rotateY: `-${degree}deg` }] : [{ perspective }, { rotateX: `${degree}deg` }] };
+  });
 
   const laneGlowStyle = useAnimatedStyle(() => {
     const lane = hitHole.value;
@@ -319,22 +339,7 @@ export function NoteTimeline({
                   : { left: 0, top: 0, width: size.width, height: playhead },
               ]}
             >
-              <View
-                style={[
-                  StyleSheet.absoluteFill,
-                  geometry.tilt
-                    ? {
-                        transform: [
-                          { perspective: geometry.tilt.perspective },
-                          horizontal
-                            ? { rotateY: `-${geometry.tilt.degree}deg` }
-                            : { rotateX: `${geometry.tilt.degree}deg` },
-                        ],
-                        transformOrigin: horizontal ? '100% 50%' : '50% 100%',
-                      }
-                    : null,
-                ]}
-              >
+              <Animated.View style={[StyleSheet.absoluteFill, { transformOrigin: horizontal ? '100% 50%' : '50% 100%' }, tiltStyle, appearanceStyle]}>
                 <View pointerEvents="none" style={[styles.canvas,
                   horizontal ? { left: playhead - geometry.ahead, top: 0, width: geometry.ahead, height: size.height }
                     : { left: 0, top: playhead - geometry.ahead, width: size.width, height: geometry.ahead }]}>
@@ -465,7 +470,7 @@ export function NoteTimeline({
                   </Svg>
                   </View>)}
                 </Animated.View>
-              </View>
+              </Animated.View>
             </View>
 
             {/* 判定线：外发光带 + 明亮实线；命中时再叠一条高亮色脉冲 */}

@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { arrange } from '../../core/arrange';
@@ -17,6 +17,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { radius, spacing } from '../../theme/tokens';
 import { Button, Icon, SongCover } from '../../ui/components';
 import { NoteTimeline } from '../../ui/NoteTimeline';
+import { PracticeSettingsPanel } from '../../ui/PracticeSettingsPanel';
 import { TransportBar } from '../../ui/TransportBar';
 
 /**
@@ -29,6 +30,10 @@ import { TransportBar } from '../../ui/TransportBar';
 export default function PracticeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [previewAngle, setPreviewAngle] = useState<number | null>(null);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const { colors } = useTheme();
   const { prefs, updatePrefs } = usePrefs();
 
@@ -192,11 +197,11 @@ export default function PracticeScreen() {
           onPress={handlePickAudio}
         />
         <Button
-          label="更换"
+          label="设置"
           icon="settings"
           variant="ghost"
           size="sm"
-          onPress={() => router.push('/settings')}
+          onPress={() => setSettingsOpen(open => !open)}
         />
       </View>
 
@@ -227,6 +232,7 @@ export default function PracticeScreen() {
         </View>
       ) : result && timeline && score ? (
         <>
+          <View style={{ flex: 1, flexDirection: window.width > window.height ? 'row' : 'column' }}>
           <NoteTimeline
             notes={result.notes}
             timeline={timeline}
@@ -235,9 +241,12 @@ export default function PracticeScreen() {
             holes={layout.holes}
             tonicPc={tonicPc}
             flow={prefs.flow}
-            viewAngle={prefs.viewAngle}
+            viewAngle={previewAngle ?? prefs.viewAngle}
             staffBar={prefs.staffBar}
           />
+          <PracticeSettingsPanel open={settingsOpen} onClose={closeSettings} prefs={{ ...prefs, viewAngle: previewAngle ?? prefs.viewAngle }}
+            onPreviewAngle={setPreviewAngle} onChange={patch => { setPreviewAngle(null); void updatePrefs(patch); }} />
+          </View>
           <View style={{ paddingBottom: insets.bottom }}>
             <TransportBar
               isPlaying={isPlaying}
