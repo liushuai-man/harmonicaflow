@@ -16,8 +16,8 @@ export function PracticeSettingsPanel({ open, onClose, prefs, onChange, onPrevie
   const { colors } = useTheme();
   const reduced = useReducedMotion();
   const style = useAnimatedStyle(() => ({
-    width: landscape ? withTiming(open ? Math.min(width * 0.4, 320) : 0, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS }) : '100%',
-    height: landscape ? '100%' : withTiming(open ? Math.min(height * 0.3, 250) : 0, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS }),
+    width: '100%',
+    height: landscape ? (open ? '100%' : 0) : withTiming(open ? Math.min(height * 0.25, 180) : 0, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS }),
     opacity: withTiming(open ? 1 : 0, { duration: reduced ? 0 : SETTINGS_TRANSITION_MS }),
   }));
   useEffect(() => {

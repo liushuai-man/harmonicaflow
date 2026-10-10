@@ -32,16 +32,16 @@ export function useActiveNote(notes: TabNote[], timeline: TimelineInfo, position
   return { activeIndex, activeNote: notes[current] };
 }
 
-function ActionLabel({ midi, action, hole, tonicPc, notes, activeIndex, colors, highlight }: {
+function ActionLabel({ midi, action, hole, tonicPc, notes, activeIndex, colors, highlight, stacked }: {
   midi: number; action: TabAction; hole: number; tonicPc: number; notes: TabNote[];
-  activeIndex: SharedValue<number>; colors: Palette; highlight: string;
+  activeIndex: SharedValue<number>; colors: Palette; highlight: string; stacked: boolean;
 }) {
   const style = useAnimatedStyle(() => {
     const note = notes[activeIndex.value];
     return { backgroundColor: note?.feasible && note.hole === hole && note.action === action ? highlight : 'transparent' };
   });
-  return <Animated.Text style={[styles.action, { color: colors.text }, style]} numberOfLines={1}>
-    {midiToJianpuText(midi, tonicPc)}{ACTIONS[action]}
+  return <Animated.Text style={[styles.action, { color: colors.text }, style]} numberOfLines={stacked ? 2 : 1}>
+    {midiToJianpuText(midi, tonicPc)}{stacked ? '\n' : ''}{ACTIONS[action]}
   </Animated.Text>;
 }
 
@@ -57,7 +57,7 @@ export function LaneLabel({ hole, tonicPc, vertical, striped, divider, colors, h
     {(['blow', 'draw', 'blowPush', 'drawPush'] as const).map(action => {
       const midi = hole[action];
       return typeof midi === 'number' ? <ActionLabel key={action} midi={midi} action={action} hole={hole.index}
-        tonicPc={tonicPc} notes={notes} activeIndex={activeIndex} colors={colors} highlight={highlight} /> : null;
+        stacked={(hole.blow === null) !== (hole.draw === null)} tonicPc={tonicPc} notes={notes} activeIndex={activeIndex} colors={colors} highlight={highlight} /> : null;
     })}
     <Text style={[styles.hole, { color: colors.textMuted }]}>{hole.index}</Text>
   </View>;
@@ -73,7 +73,7 @@ export function CurrentAction({ note, tonicPc }: { note?: TabNote; tonicPc: numb
 
 const styles = StyleSheet.create({
   cell: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  action: { fontSize: 9, lineHeight: 13, borderRadius: 2 },
+  action: { fontSize: 9, lineHeight: 11, borderRadius: 2, textAlign: 'center' },
   hole: { fontSize: 8, lineHeight: 10 },
   current: { paddingVertical: 4, alignItems: 'center' },
   currentText: { fontSize: 16, fontWeight: '700' },

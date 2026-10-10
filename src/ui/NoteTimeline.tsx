@@ -21,7 +21,6 @@ import Svg, {
 } from 'react-native-svg';
 
 import type { Hole, TabAction, TabNote } from '../core/model';
-import { midiToJianpuText } from '../core/pitch';
 import {
   BLOCK_GAP,
   LABEL_AREA_H,
@@ -534,7 +533,7 @@ export function NoteTimeline({
               })}
             </View>
 
-            {rowSize >= 12 ? (
+            {rowSize > 0 ? (
               <View
                 style={[
                   styles.labelRow,

@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +32,7 @@ export default function PracticeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const window = useWindowDimensions();
+  const landscape = window.width > window.height;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewAngle, setPreviewAngle] = useState<number | null>(null);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
@@ -162,15 +163,17 @@ export default function PracticeScreen() {
   const stats = result?.stats;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen options={{ title: entry?.title ?? '跟吹' }} />
+    <View style={[styles.container, { backgroundColor: colors.background, paddingLeft: insets.left, paddingRight: insets.right, paddingTop: landscape ? insets.top : 0 }]}>
+      <Stack.Screen options={{ title: entry?.title ?? '跟吹', headerShown: !landscape }} />
 
       <View
         style={[
           styles.topBar,
+          landscape && { paddingVertical: 2 },
           { backgroundColor: colors.surface, borderBottomColor: colors.border },
         ]}
       >
+        {landscape ? <Button label="返回" size="sm" variant="ghost" onPress={() => router.back()} /> : null}
         <Pressable
           onPress={handlePickCover}
           hitSlop={6}
@@ -233,7 +236,7 @@ export default function PracticeScreen() {
         </View>
       ) : result && timeline && score ? (
         <>
-          <View style={{ flex: 1, flexDirection: window.width > window.height ? 'row' : 'column' }}>
+          <View style={{ flex: 1, flexDirection: landscape ? 'row' : 'column' }}>
           <View style={{ flex: 1 }}>
           <NoteTimeline
             notes={result.notes}
@@ -246,13 +249,18 @@ export default function PracticeScreen() {
             viewAngle={previewAngle ?? prefs.viewAngle}
             staffBar={prefs.staffBar}
           />
-          {prefs.notation ? <NotationStaff score={score} timeline={timeline} positionMs={positionMs} /> : null}
           </View>
+          <View style={landscape ? { width: prefs.notation || settingsOpen ? Math.min(window.width * 0.38, 320) : 0, overflow: 'hidden' } : undefined}>
+          {prefs.notation ? <NotationStaff score={score} timeline={timeline} positionMs={positionMs} /> : null}
+          <View style={landscape ? { flex: 1, minHeight: 0 } : undefined}>
           <PracticeSettingsPanel open={settingsOpen} onClose={closeSettings} prefs={{ ...prefs, viewAngle: previewAngle ?? prefs.viewAngle }}
             onPreviewAngle={setPreviewAngle} onChange={patch => { setPreviewAngle(null); void updatePrefs(patch); }} />
           </View>
+          </View>
+          </View>
           <View style={{ paddingBottom: insets.bottom }}>
             <TransportBar
+              compact={landscape}
               isPlaying={isPlaying}
               speed={speed}
               positionMs={positionMs}

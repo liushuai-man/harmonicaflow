@@ -4,7 +4,7 @@
     "slug": "harmonicaflow",
     "scheme": "harmonicaflow",
     "version": "0.2.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "plugins": [

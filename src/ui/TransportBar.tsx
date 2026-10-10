@@ -14,6 +14,7 @@ import { elevation, radius, spacing } from '../theme/tokens';
 import { Button } from './components';
 
 interface TransportBarProps {
+  compact?: boolean;
   isPlaying: boolean;
   speed: number;
   positionMs: SharedValue<number>;
@@ -25,6 +26,7 @@ interface TransportBarProps {
 }
 
 export function TransportBar({
+  compact = false,
   isPlaying,
   speed,
   positionMs,
@@ -66,6 +68,7 @@ export function TransportBar({
     <View
       style={[
         styles.container,
+        compact && { paddingVertical: 4 },
         { backgroundColor: colors.surface, borderTopColor: colors.border },
         elevation(2, colors.shadow),
       ]}
@@ -103,6 +106,7 @@ export function TransportBar({
           label="重播"
           icon="restart"
           variant="secondary"
+          size={compact ? 'sm' : 'md'}
           onPress={onRestart}
           style={styles.side}
         />
@@ -110,6 +114,7 @@ export function TransportBar({
           label={isPlaying ? '暂停' : '播放'}
           icon={isPlaying ? 'pause' : 'play'}
           variant="primary"
+          size={compact ? 'sm' : 'md'}
           onPress={onPlayPause}
           style={styles.main}
         />
@@ -117,6 +122,7 @@ export function TransportBar({
           label={`${speed}x`}
           icon="gauge"
           variant="secondary"
+          size={compact ? 'sm' : 'md'}
           onPress={cycleSpeed}
           style={styles.side}
         />

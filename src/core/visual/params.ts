@@ -94,8 +94,8 @@ export type StaffBarMode = 'full' | 'hint' | 'off';
 export const DEFAULT_SKIN: SkinMode = 'mono';
 /** 默认透明度档位 */
 export const DEFAULT_OPACITY: OpacityMode = 'solid';
-/** 默认落块方向：自动（按宽高比选向） */
-export const DEFAULT_FLOW = 'auto' as const;
+/** 默认始终向下落；已有 auto/right 偏好保持。 */
+export const DEFAULT_FLOW = 'down' as const;
 /** 默认横向琴谱模式：精简提示条 */
 export const DEFAULT_STAFF_BAR: StaffBarMode = 'hint';
 /** 默认不拉取在线随机封面（离线优先） */

@@ -1,6 +1,6 @@
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { arrange } from '../core/arrange';
 import { buildExercise, EXERCISES } from '../core/learning';
@@ -20,6 +20,8 @@ export function ExercisePlayer({ id, layout }: { id: string; layout: HarmonicaLa
   const { colors } = useTheme();
   const { prefs } = usePrefs();
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const landscape = window.width > window.height;
   const definition = EXERCISES.find((exercise) => exercise.id === id);
   const data = useMemo(() => {
     const score = buildExercise(id, layout);
@@ -34,20 +36,21 @@ export function ExercisePlayer({ id, layout }: { id: string; layout: HarmonicaLa
     <Button label={definition ? '核对口琴设置' : '返回入门练习'} onPress={() => router.replace(definition ? '/settings' : '/learn')} />
   </View>;
 
-  return <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: insets.bottom }]}>
-    <Stack.Screen options={{ title: definition.title }} />
-    <View style={styles.instructions}>
+  return <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right, paddingTop: landscape ? insets.top : 0 }]}>
+    <Stack.Screen options={{ title: definition.title, headerShown: !landscape }} />
+    <View style={[styles.instructions, landscape && { paddingVertical: 2 }]}>
+      {landscape ? <Button label="返回" size="sm" variant="ghost" onPress={() => router.back()} /> : null}
       <Text style={[styles.caption, { color: colors.accent }]}>{layout.key} 大调 · 4/4 · 基础速度 60 BPM</Text>
       <Text style={[styles.hint, { color: colors.text }]}>{definition.cue}</Text>
       <Text style={[styles.caption, { color: colors.textMuted }]}>看底部孔位与吹吸，压线时演奏。无示范音或听音评分。</Text>
     </View>
-    <View style={styles.container}>
+    <View style={[styles.container, { flexDirection: landscape ? 'row' : 'column' }]}>
       <NoteTimeline notes={data.result.notes} timeline={data.timeline} positionMs={playback.positionMs} revision={playback.revision}
         holes={layout.holes} tonicPc={keySignatureToTonicPc(layout.key)} flow={prefs.flow}
         viewAngle={prefs.viewAngle} staffBar={prefs.staffBar} />
-      {prefs.notation ? <NotationStaff score={data.score} timeline={data.timeline} positionMs={playback.positionMs} /> : null}
+      {prefs.notation ? <View style={landscape ? { width: Math.min(window.width * 0.38, 320) } : undefined}><NotationStaff score={data.score} timeline={data.timeline} positionMs={playback.positionMs} /></View> : null}
     </View>
-    <TransportBar isPlaying={playback.isPlaying} speed={playback.speed} positionMs={playback.positionMs}
+    <TransportBar compact={landscape} isPlaying={playback.isPlaying} speed={playback.speed} positionMs={playback.positionMs}
       totalMs={data.timeline.totalMs} onPlayPause={playback.isPlaying ? playback.pause : playback.play}
       onRestart={playback.restart} onSeek={playback.seek} onSpeedChange={playback.setSpeed} />
   </View>;

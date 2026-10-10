@@ -372,7 +372,7 @@ totalMs   = max(startTicks + durationTicks) * msPerTick
 - **方向策略**（`flow: 'down' | 'right' | 'auto'`，来自设置，接口与纯几何见 `core/visual/flow.ts`）：把「时间轴 + 判定线 + 音阶标注」抽象成一个 `FlowLayout` 策略，两个方向实现**共用同一套**音块分层渲染、可视剔除、触碰特效、命中高亮逻辑，差别只在坐标映射与判定线位置：
   - `down`：X = 孔位列，Y = 时间；判定线在**底部**横线；音阶标注在判定线**下方**。
   - `right`：Y = 孔位列，X = 时间；判定线在**右侧**竖线；音阶标注在判定线**右侧**（孔列自上而下依次排列）。
-  - `auto`（默认）：按可视区**宽高比**自动选向——竖屏 / 窄窗选 `down`，横屏 / 宽窗选 `right`，随窗口尺寸变化即时重算（纯函数 `resolveFlow(flow, {width, height})`）。方向是**用户可改的偏好**，不是硬约束。
+  - `auto`（可选，默认改为 `down`）：按可视区**宽高比**自动选向——竖屏 / 窄窗选 `down`，横屏 / 宽窗选 `right`，随窗口尺寸变化即时重算（纯函数 `resolveFlow(flow, {width, height})`）。方向是**用户可改的偏好**，不是硬约束。
   - 切换方向保持 `positionMs` 不变（不打断滚动位置），仅重算布局参数。
 - 固定轨道层由视口与透视预排范围决定，曲终仍在；音块使用固定时间原点的 SVG 分片，每片不超过 512 逻辑像素且时间轴边长不超过 2048 物理像素。只挂载可见分片与缓冲区，共享一个 UI 线程平移；不再用全曲长度分配原生 SVG 位图。
 - **全曲绝对坐标**：音块坐标只由音符自身时刻决定，与可视窗口无关。滚动完全由 UI 线程的整块平移承担（anchor-free、永不重建），因此每 500ms 的重算不会改变渲染坐标，滚动连续无跳动。
@@ -611,7 +611,7 @@ src/player/               timing.ts · usePlayback.ts · timeSource.ts（音频�
 src/theme/                color.ts · palette.ts · skin.ts · tokens.ts · ThemeProvider.tsx
 src/ui/                   NoteTimeline.tsx（双向单视图）· StaffBar.tsx（横向琴谱）· TransportBar.tsx（播放控件）
 src/ui/components/        Icon.tsx · Card.tsx · Button.tsx · Badge.tsx · IconTile.tsx · SegmentedControl.tsx · Slider.tsx · Row.tsx · HarmonicaMark.tsx · SongCover.tsx · index.ts
-src/ui/effects/           types.ts · registry.ts · pulse.tsx
+src/ui/effects/           types.ts · registry.ts · shatter.tsx
 src/store/                docStore.ts（唯一存储边界）· library.ts · prefs.tsx · coverCache.ts · audioCache.ts
 assets/songs/             内置示例曲 JSON
 assets/covers/            可选内置封面
@@ -763,3 +763,7 @@ npx eas-cli@latest update --channel preview --message "修复跟吹页..." --env
 PracticeSettings 在全局页和跟吹页复用。竖屏底部抽屉、横屏侧栏保留演奏区且不暂停；Android 返回先收起面板。角度预览仅页面内存，松手经 updatePrefs/docStore 保存；按钮选项即时保存。皮肤/透明度淡入、视角与抽屉使用180ms过渡并遵循减少动态效果。换琴只重编配，不重启播放位置；详细校对仍在全局页。
 
 持久化（§8 / §12.1）补充：Prefs.notation 默认 true；旧数据缺少或字段类型非法时回落 true，已保存 false 保留。谱面与解析器模型未改变；NotationStaff 是派生呈现，不写回 Score。
+
+### 横竖屏实施补充（§7 / §11 / §11.8，2026-10-10）
+
+app.json orientation=default，跟随系统旋转锁设置，不新增方向库。新偏好 DEFAULT_FLOW=down；旧 auto/right 保留。跟吹页与练习页按 useWindowDimensions 重排而不重建播放 hook：横屏收紧顶栏/控制栏，五线谱与设置共用侧栏，保留完整瀑布高度，安全区避开挖孔和手势区。独立 APK 必须通过 EAS 重新构建以应用原生方向配置；本次未发起云端构建，Expo Go / 真机旋转仍待验证。
