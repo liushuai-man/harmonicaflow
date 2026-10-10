@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -42,7 +42,7 @@ import {
 } from '../core/visual';
 import { LEAD_IN_MS, type TimelineInfo } from '../player/timing';
 import { withAlpha } from '../theme/color';
-import type { Palette } from '../theme/palette';
+import { CurrentAction, LaneLabel, useActiveNote } from './PerformanceLabels';
 import { useTheme } from '../theme/ThemeProvider';
 import { getEffect } from './effects/registry';
 import type { EffectContext } from './effects/types';
@@ -119,63 +119,6 @@ const PLAYHEAD_GLOW = 22;
 /** 命中时该列光带的长度（沿时间轴） */
 const HIT_GLOW_LEN = 64;
 
-/** 底部/右侧音阶标注单元：命中时整格被高亮色点亮（UI 线程，不触发重渲染） */
-interface LaneLabelProps {
-  hole: Hole;
-  tonicPc: number;
-  vertical: boolean;
-  striped: boolean;
-  divider: boolean;
-  colors: Palette;
-  highlight: string;
-  hitHole: SharedValue<number>;
-  hitPulse: SharedValue<number>;
-}
-
-function LaneLabel({
-  hole,
-  tonicPc,
-  vertical,
-  striped,
-  divider,
-  colors,
-  highlight,
-  hitHole,
-  hitPulse,
-}: LaneLabelProps) {
-  const pulseStyle = useAnimatedStyle(
-    () => ({ opacity: hitHole.value === hole.index ? hitPulse.value * 0.32 : 0 }),
-    [hole.index],
-  );
-
-  return (
-    <View
-      style={[
-        styles.labelCell,
-        striped && { backgroundColor: colors.surfaceAlt },
-        divider &&
-          (vertical
-            ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }
-            : { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border }),
-      ]}
-    >
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: highlight }, pulseStyle]}
-      />
-      <Text style={[styles.labelText, { color: colors.blow }]} numberOfLines={1}>
-        {midiToJianpuText(hole.blow, tonicPc)}
-      </Text>
-      <Text style={[styles.labelText, { color: colors.draw }]} numberOfLines={1}>
-        {midiToJianpuText(hole.draw, tonicPc)}
-      </Text>
-      <Text style={[styles.holeText, { color: colors.textMuted }]} numberOfLines={1}>
-        {hole.index}
-      </Text>
-    </View>
-  );
-}
-
 export function NoteTimeline({
   notes,
   timeline,
@@ -191,6 +134,7 @@ export function NoteTimeline({
   const [anchorMs, setAnchorMs] = useState(0);
   const [effects, setEffects] = useState<EffectInstance[]>([]);
 
+  const { activeIndex, activeNote } = useActiveNote(notes, timeline, positionMs);
   const holeCount = holes.length;
   const effect = getEffect();
 
@@ -446,7 +390,10 @@ export function NoteTimeline({
                     animatedStyle,
                   ]}
                 >
-                  <Svg width={geometry.songLen} height={horizontal ? size.height : geometry.songLen}>
+                  <Svg
+                    width={horizontal ? geometry.songLen : size.width}
+                    height={horizontal ? size.height : geometry.songLen}
+                  >
                     {/* 渐变只在 Defs 里各定义一次；objectBoundingBox 单位可被任意尺寸音块复用 */}
                     <Defs>
                       {(Object.keys(skin.block) as (TabAction | 'infeasible')[]).map((key) => {
@@ -686,8 +633,8 @@ export function NoteTimeline({
                     divider={index > 0}
                     colors={colors}
                     highlight={skin.highlight}
-                    hitHole={hitHole}
-                    hitPulse={hitPulse}
+                    notes={notes}
+                    activeIndex={activeIndex}
                   />
                 ))}
               </View>
@@ -696,6 +643,7 @@ export function NoteTimeline({
         ) : null}
       </View>
 
+      <CurrentAction note={activeNote} tonicPc={tonicPc} />
       {staffBar !== 'off' ? (
         <StaffBar
           notes={notes}
